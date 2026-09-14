@@ -59,11 +59,13 @@ enum StatusItemIcon {
         guard let fraction else { return }        // nil: leave the track empty
         let clamped = max(0, min(1, fraction))
         guard clamped > 0 else { return }
-        // Keep a minimum nub so a tiny-but-nonzero value is still visible
-        // as "something", without implying it is large.
-        let h = max(w, trackRect.height * CGFloat(clamped))
+        // A 3pt floor so a small-but-nonzero value is still visible. Keep it
+        // well under half the bar: a floor of `w` would make everything
+        // below ~45% render identically, which is worse than useless.
+        let h = max(3, trackRect.height * CGFloat(clamped))
         let fillRect = NSRect(x: x, y: 1, width: w, height: h)
         fill.setFill()
-        NSBezierPath(roundedRect: fillRect, xRadius: radius, yRadius: radius).fill()
+        NSBezierPath(roundedRect: fillRect,
+                     xRadius: min(radius, h / 2), yRadius: min(radius, h / 2)).fill()
     }
 }
