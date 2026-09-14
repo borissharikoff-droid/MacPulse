@@ -120,6 +120,19 @@ enum UIFmt {
         guard let v else { return "—" }
         return String(format: "%.0f", v)
     }
+
+    /// Two rates sharing ONE unit, picked from the larger of the pair:
+    /// "0.9/0.9 КБ/с". Formatting them independently produces
+    /// "940 Б/с / 940 Б/с", which does not fit a mini stat and truncates.
+    static func pairRate(_ a: Double?, _ b: Double?) -> String {
+        guard let a, let b else { return "—" }
+        let units = ["Б", "КБ", "МБ", "ГБ"]
+        var i = 0
+        var scale = 1.0
+        while max(a, b) / scale >= 1024, i < units.count - 1 { scale *= 1024; i += 1 }
+        let digits = i == 0 ? 0 : 1
+        return String(format: "%.\(digits)f/%.\(digits)f %@/с", a / scale, b / scale, units[i])
+    }
 }
 
 // MARK: - Sparkline
@@ -513,7 +526,9 @@ private struct SystemStrip: View {
                      value: UIFmt.pct(snapshot?.battery?.charge))
             MiniStat(title: "ДИСК ЗАП", value: UIFmt.rate(snapshot?.disk?.writeBytesPerSec))
             MiniStat(title: "СЕТЬ ↓/↑",
-                     value: "\(UIFmt.rate(snapshot?.network?.bytesInPerSec))/\(UIFmt.rate(snapshot?.network?.bytesOutPerSec))")
+                     value: UIFmt.pairRate(snapshot?.network?.bytesInPerSec,
+                                           snapshot?.network?.bytesOutPerSec))
+                .frame(minWidth: 84)
         }
     }
 
