@@ -26,8 +26,18 @@ SDK="${MACPULSE_SDK:-/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk}"
 # and IOKit.ps. libIOReport is NOT linked here — PowerSampler resolves it with
 # dlopen/dlsym so a missing private symbol degrades to "power unavailable"
 # instead of failing to launch.
+# Pin the DEPLOYMENT TARGET too. Without it swiftc stamps the binary with
+# whatever the host OS is (minos 26.0 was measured here) while Info.plist
+# advertised LSMinimumSystemVersion 13.0 — the two disagreeing is how you
+# ship something that launchd will happily start on a machine the binary
+# cannot actually run on. 13.0 matches Info.plist and is enough for
+# everything used here (NSScreen.safeAreaInsets / auxiliaryTopLeftArea are
+# macOS 12+, SMAppService is 13+).
+DEPLOY_TARGET="arm64-apple-macos13.0"
+
 swiftc -O \
   -sdk "$SDK" \
+  -target "$DEPLOY_TARGET" \
   -o "$BIN_PATH" \
   "$ROOT"/Sources/*.swift \
   -framework AppKit -framework ServiceManagement -framework IOKit
