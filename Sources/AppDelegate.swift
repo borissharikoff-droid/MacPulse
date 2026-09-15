@@ -126,9 +126,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         if let top = s.processes?.apps.first {
             lines.append("Самое крупное: \(top.name) — \(UIFmt.bytes(top.footprintBytes))")
         }
-        if let c = s.cpu {
-            lines.append("CPU P/E: \(UIFmt.pct(c.performance?.load.busy)) / \(UIFmt.pct(c.efficiency?.load.busy))")
-        }
         return lines.isEmpty ? "MacPulse" : lines.joined(separator: "\n")
     }
 

@@ -502,12 +502,9 @@ private struct SystemStrip: View {
     let snapshot: MetricsSnapshot?
 
     var body: some View {
-        let cpu = snapshot?.cpu
         let p = snapshot?.power
         let t = snapshot?.thermal
         HStack(alignment: .top, spacing: 8) {
-            MiniStat(title: "CPU P/E",
-                     value: "\(UIFmt.pct(cpu?.performance?.load.busy))/\(UIFmt.pct(cpu?.efficiency?.load.busy))")
             MiniStat(title: "GPU", value: UIFmt.pct(snapshot?.gpu?.utilization))
             MiniStat(title: "ВТ CPU/GPU",
                      value: "\(UIFmt.shortWatts(p?.cpuWatts))/\(UIFmt.shortWatts(p?.gpuWatts))")
