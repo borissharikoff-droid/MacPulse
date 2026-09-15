@@ -30,6 +30,9 @@ import SwiftUI
 private struct RailChip: View {
     let section: IslandSection
     let isSelected: Bool
+    /// From `IslandRail.chipPadding(chips:)` — NOT a constant here. See
+    /// that method for why the rail, and not the chip, decides it.
+    let horizontalPadding: CGFloat
     let onTap: () -> Void
 
     @State private var hovering = false
@@ -45,7 +48,7 @@ private struct RailChip: View {
                     .font(.system(size: 10.5, weight: isSelected ? .semibold : .regular))
             }
             .foregroundStyle(isSelected ? Color.white : Color(white: hovering ? 0.72 : 0.55))
-            .padding(.horizontal, 9)
+            .padding(.horizontal, horizontalPadding)
             .frame(height: 20)
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -69,7 +72,29 @@ struct IslandRail: View {
         model.visibleSections.compactMap { IslandSectionRegistry.section($0) }
     }
 
+    /// Horizontal padding inside each chip, as a function of how many
+    /// chips the rail is holding.
+    ///
+    /// THE RAIL HAS NO WRAP AND NO SCROLL, and it cannot grow: the content
+    /// box is 532 pt and the panel is 560 and staying 560. A chip that
+    /// does not fit is not clipped politely — it is pushed off the plate,
+    /// where the tab exists, is listed, and cannot be clicked.
+    ///
+    /// With one section that could never happen and this was a constant 9.
+    /// With seven it can: measured by `--rail-probe` at the selected
+    /// chip's semibold weight, all seven titles plus their symbols come to
+    /// 545.4 pt at 9 pt padding — 13.4 pt over. At 6 pt they come to
+    /// 503.4 and fit with 28.6 to spare.
+    ///
+    /// So the padding tightens at six chips and not before. Five or fewer
+    /// — every case anyone will actually see — is pixel-identical to what
+    /// the rail has always drawn. `--rail-probe` recomputes this against
+    /// the live registry on every run, so a section added later that does
+    /// not fit says so in a number rather than on screen.
+    static func chipPadding(chips: Int) -> CGFloat { chips >= 6 ? 6 : 9 }
+
     var body: some View {
+        let padding = Self.chipPadding(chips: live.count)
         HStack(spacing: 4) {
             if live.count <= 1 {
                 if let only = live.first {
@@ -83,6 +108,7 @@ struct IslandRail: View {
                 ForEach(live) { section in
                     RailChip(section: section,
                              isSelected: section.id == model.selectedSection,
+                             horizontalPadding: padding,
                              onTap: { model.select(section.id) })
                 }
             }

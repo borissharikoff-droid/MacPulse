@@ -70,6 +70,31 @@ enum RailProbe {
         print("  chips: \(live.count) of \(IslandSectionRegistry.sections.count) registered")
         print("")
 
+        // The rail is a plain HStack with no wrap and no scroll. With one
+        // section that could not matter; with seven it can, and a rail
+        // that overflows pushes its last chip off the 560 pt plate where
+        // nothing can click it. Nobody can see this on a locked screen, so
+        // it is arithmetic rather than a look.
+        print("--- rail width, WORST CASE (every section live at once) -------")
+        let available = IslandMetrics.panelWidth - IslandRouter.gutter * 2
+        let count = IslandSectionRegistry.sections.count
+        let padding = IslandRail.chipPadding(chips: count)
+        print(String(format: "  %.0f chips -> %.0f pt of padding inside each one",
+                     Double(count), padding))
+        var total: CGFloat = 0
+        for (i, section) in IslandSectionRegistry.sections.enumerated() {
+            let w = chipWidth(section, padding: padding)
+            total += w + (i > 0 ? 4 : 0)     // 4 pt is IslandRail's HStack spacing
+            print("  " + pad(section.chipTitle, 12) + String(format: "%6.1f pt", w))
+        }
+        print(String(format: "  %@%6.1f pt of %.0f available", pad("TOTAL", 12),
+                     total, available))
+        print(total <= available
+              ? String(format: "  fits, with %.1f pt to spare", available - total)
+              : String(format: "  *** OVERFLOWS BY %.1f pt — the last chip is off the plate",
+                       total - available))
+        print("")
+
         print("--- the collapsed strip ---------------------------------------")
         print("  trailing wing   \(Int(model.trailingWingWidth)) pt"
               + "  (resting \(Int(IslandMetrics.restingWingWidth)),"
@@ -104,6 +129,29 @@ enum RailProbe {
         model.stop()
         print("=== done ===")
         exit(0)
+    }
+
+    /// Mirrors `RailChip`'s layout exactly: the padding either side, a 4 pt
+    /// gap, the SF Symbol at 9 pt semibold and the title at 10.5 pt.
+    /// SEMIBOLD, because that is what the SELECTED chip uses and the
+    /// selected chip is the wide one — measuring the regular weight would
+    /// under-report the only case that can overflow. The padding comes
+    /// from `IslandRail.chipPadding` and is not restated here, so this
+    /// cannot drift from what is drawn.
+    private static func chipWidth(_ section: IslandSection, padding: CGFloat) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: 10.5, weight: .semibold)
+        var width = padding * 2 + (section.chipTitle as NSString)
+            .size(withAttributes: [.font: font]).width
+        if !section.chipSymbol.isEmpty {
+            let image = NSImage(systemSymbolName: section.chipSymbol,
+                                accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
+            // 11 pt if the symbol could not be measured: wider than most
+            // 9 pt glyphs, so an unmeasurable symbol errs towards saying
+            // the rail is fuller than it is.
+            width += 4 + (image?.size.width ?? 11)
+        }
+        return width
     }
 
     private static func pad(_ s: String, _ width: Int) -> String {
