@@ -41,14 +41,55 @@ final class PowerSampler {
         let chans = group.takeRetainedValue()
         self.channels = chans
 
+        // IOReportCreateSubscription follows the CREATE RULE twice over, and
+        // both halves were being dropped on the floor.
+        //
+        //  * the `subbedChannels` out-parameter comes back +1 and is ours.
+        //    Measured: it really is populated (one key), so it is not an
+        //    "optional, usually NULL" parameter that can be ignored. We never
+        //    read it — the channel dictionary we passed in is the one we
+        //    sample with — so it is released immediately. Unmanaged does not
+        //    do this for us: a +1 value reaching Swift as
+        //    `Unmanaged<CFMutableDictionary>` through a dlsym'd function
+        //    pointer is outside ARC entirely until somebody says
+        //    takeRetainedValue() or release().
+        //
+        //  * the subscription itself is also +1. It is typed here as a raw
+        //    pointer because that is what the C signature gives us, but it is
+        //    a genuine CF object — measured: CFGetTypeID reports
+        //    "IOReportSubscription" — so it is CFReleased in deinit. Not
+        //    releasing it cost ~65 KB per subscription (measured: 500
+        //    create/destroy cycles grew phys_footprint by 31.8 MB unreleased
+        //    versus 80 KB released).
         var subscriptionDict: Unmanaged<CFMutableDictionary>?
-        guard let sub = lib.createSubscription(nil, chans, &subscriptionDict, 0, nil) else { return nil }
+        guard let sub = lib.createSubscription(nil, chans, &subscriptionDict, 0, nil) else {
+            subscriptionDict?.release()
+            return nil
+        }
+        subscriptionDict?.release()
         self.subscription = sub
 
         // Baseline immediately so the first real tick already has a delta.
+        //
+        // Deliberately NO explicit release on this failure path:
+        // `self.subscription` is assigned above and every remaining stored
+        // property has a default, so the instance is fully initialized by
+        // here — and a class failable initializer that returns nil after full
+        // initialization DOES run deinit (verified on this toolchain).
+        // Releasing here too would be a double release.
         guard let first = lib.createSamples(sub, chans, nil) else { return nil }
         previousSample = first.takeRetainedValue()
         previousAt = Mono.now()
+    }
+
+    deinit {
+        // IOReportSubscriptionRef is a raw pointer in the C signature but a CF
+        // object in fact (CFGetTypeID -> "IOReportSubscription"), created +1.
+        // In the shipping app this object lives for the whole process, so this
+        // is hygiene rather than a bug fix — but a sampler that is created and
+        // dropped (a failed probe, a future teardown path) must not strand
+        // 65 KB of kernel-backed subscription state.
+        Unmanaged<AnyObject>.fromOpaque(subscription).release()
     }
 
     /// SMC-sourced whole-system numbers are merged in by MetricsEngine; this
