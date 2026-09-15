@@ -54,67 +54,6 @@ extension IslandSectionID {
 
 // MARK: - Collapsed strip slot
 
-/// The trailing wing's slot while audio is leaving the machine — and only
-/// while it is. Per the arch spike this feature earns ambient pixels for
-/// exactly as long as something is actually making sound, which is also
-/// the only time the answer is interesting.
-///
-/// ONE 14 pt APP ICON AND NOTHING ELSE. There is no text: the widest
-/// thing the wing can hold beside the privacy rail is 25 pt, which is
-/// four monospaced digits — enough for "1ч23" and not for any app name
-/// worth printing. The icon is the whole readout, and it reuses the print
-/// ring's 14 pt box, so `IslandMetrics.trailingLayout` needs no new
-/// number to lay this out.
-///
-/// WITH SEVERAL SOURCES IT DRAWS A SPEAKER, NOT SOMEBODY'S ICON. Picking
-/// one of them for the strip would nominate a favourite, which is the one
-/// thing this feature has measured grounds never to do.
-struct SoundStripSlot: View {
-    let state: SoundState
-
-    /// The icon box IS the ring's box. Defined as that constant rather
-    /// than as 14 so it cannot drift from the wing arithmetic that
-    /// reserves it.
-    static let iconSize: CGFloat = IslandMetrics.ringDiameter
-
-    /// What `IslandModel.updateTrailingSlot` should ask the wing for when
-    /// this slot wins it: the lead-in, the icon, the gap and the privacy
-    /// rail that is pinned to its right. 7 + 14 + 4 + 23 = 48, against the
-    /// print ring's 77 — this slot has no text, so it does not ask for the
-    /// 29 pt the text would need.
-    static let wingWidth: CGFloat =
-        IslandMetrics.slotLeadingGap + iconSize + IslandMetrics.slotGap
-        + IslandMetrics.privacyRailWidth
-
-    var body: some View {
-        Group {
-            if let icon = state.single?.icon {
-                Image(nsImage: icon)
-                    .resizable()
-                    .frame(width: Self.iconSize, height: Self.iconSize)
-            } else {
-                // No icon, or more than one source. A speaker claims
-                // nothing about WHO.
-                Image(systemName: "speaker.wave.2.fill")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Color(white: 0.82))
-                    .frame(width: Self.iconSize, height: Self.iconSize)
-            }
-        }
-        .help(Self.tooltip(state))
-    }
-
-    static func tooltip(_ state: SoundState) -> String {
-        guard let apps = state.apps, !apps.isEmpty else {
-            return "Аудиопоток открыт"
-        }
-        let who = apps.count == 1
-            ? apps[0].name
-            : SoundFeature.sources(apps.count) + ": " + apps.map(\.name).joined(separator: ", ")
-        return "Аудиопоток открыт — \(who). " + SoundFeature.outputStreamCaveat
-    }
-}
-
 // MARK: - The 560 x 186 body
 
 private struct SoundSectionView: View {

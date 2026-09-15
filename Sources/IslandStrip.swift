@@ -88,15 +88,17 @@ struct IslandTrailingWing: View {
     let availableWidth: CGFloat
 
     private var layout: IslandMetrics.TrailingLayout {
-        // ONE `slotVisible`, four possible occupants. The test must be the
+        // ONE `slotVisible`, TWO possible occupants. The test must be the
         // disjunction of every branch in the body below, or the layout
         // reserves no width for a slot that then tries to draw.
+        //
+        // Sound and tunnel were removed from both together — see the note
+        // beside `IslandModel.updateTrailingSlot`, which is where the
+        // reasoning lives.
         IslandMetrics.trailingLayout(wing: availableWidth,
                                      privacyVisible: !model.privacy.isQuiet,
                                      slotVisible: model.printer != nil
-                                                  || model.calendarStrip != nil
-                                                  || model.sound.hasOutput
-                                                  || model.tunnel?.deservesStripSlot == true)
+                                                  || model.calendarStrip != nil)
     }
 
     var body: some View {
@@ -121,8 +123,10 @@ struct IslandTrailingWing: View {
             // that method picked which section the click navigates to, and
             // drawing a different one here would open the wrong tab.
             //
-            // Print, then meeting, then sound, then tunnel. The reasoning
-            // for that order is written out once, beside the arbiter.
+            // Print, then meeting. Sound and tunnel are deliberately absent
+            // — both were measured to be permanently true on this machine,
+            // which is a lamp rather than a signal; the reasoning is written
+            // out once, beside the arbiter.
             if l.slotWidth > 0 {
                 if let reading = model.printer {
                     PrintStripSlot(reading: reading, showsText: l.showsSlotText)
@@ -131,12 +135,6 @@ struct IslandTrailingWing: View {
                           let meeting = model.calendar.next {
                     MeetingStripSlot(event: meeting, countdown: countdown,
                                      showsText: l.showsSlotText)
-                        .frame(width: l.slotWidth, alignment: .leading)
-                } else if model.sound.hasOutput {
-                    SoundStripSlot(state: model.sound)
-                        .frame(width: l.slotWidth, alignment: .leading)
-                } else if let tunnel = model.tunnel, tunnel.deservesStripSlot == true {
-                    TunnelStripSlot(metrics: tunnel)
                         .frame(width: l.slotWidth, alignment: .leading)
                 }
             }

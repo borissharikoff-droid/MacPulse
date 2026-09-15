@@ -631,23 +631,28 @@ final class IslandModel: ObservableObject {
             // ONE worst case rather than two.
             requestTrailingWing(IslandMetrics.maxTrailingWingWidth)
             setStripSlotSection(.calendar)
-        } else if sound.hasOutput {
-            // Asks for LESS than the ceiling: one 14 pt app icon and no
-            // text, 48 pt against the ring's 77. There is no honest
-            // four-character form of "what is playing".
-            requestTrailingWing(SoundStripSlot.wingWidth)
-            setStripSlotSection(.sound)
-        } else if tunnel?.deservesStripSlot == true {
-            // `== true` and not `!= false` — nil is "could not measure"
-            // and must never light the wing.
-            //
-            // 48 pt, for the same reason as the sound slot: 7 lead-in +
-            // 14 glyph + 4 gap + 23 rail is everything TunnelStripSlot can
-            // spend, and asking for the ceiling would reserve 25 pt of
-            // menu bar that nothing would draw in.
-            requestTrailingWing(IslandMetrics.slotLeadingGap + IslandMetrics.ringDiameter
-                                + IslandMetrics.slotGap + IslandMetrics.privacyRailWidth)
-            setStripSlotSection(.tunnel)
+        // SOUND AND TUNNEL ARE DELIBERATELY NOT HERE, and both used to be.
+        // Measured on this machine, which is what changed my mind:
+        //
+        //   sound  — Zen holds an output stream open CONTINUOUSLY. Three
+        //            probes two minutes apart, always "audio open: Zen".
+        //            `hasOutput` is honestly documented as "somebody has a
+        //            stream open", NOT "something is playing" — the play
+        //            state is not knowable at all — so this lit the wing
+        //            around the clock while saying nothing.
+        //   tunnel — FlClashX is up permanently and is never the default
+        //            route, so `deservesStripSlot` was permanently true.
+        //            That gate was written to prevent a permanently-lit VPN
+        //            badge and on this machine it produced exactly one.
+        //
+        // Applying this list's own rule — cost of missing it — settles it:
+        // missing a print costs filament and hours, missing a meeting costs
+        // the meeting, and missing "a browser has an audio stream open"
+        // costs nothing. A wing that is always lit is a wing you stop
+        // reading, which would cost the two above their only channel.
+        //
+        // Both KEEP their rail chips. The panel is where you go to look;
+        // the wing is for what you must not miss without looking.
         } else {
             requestTrailingWing(IslandMetrics.restingWingWidth)
             setStripSlotSection(.memory)

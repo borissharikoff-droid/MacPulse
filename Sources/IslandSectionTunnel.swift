@@ -176,39 +176,6 @@ private enum TunnelWords {
 
 // MARK: - Collapsed strip slot
 
-/// The glyph in the trailing wing. On screen ONLY while
-/// `deservesStripSlot` is true — a tunnel is up AND it is not the default
-/// route. A branch arrow, because that is literally the state: the traffic
-/// left by a different path than the routing table's headline answer.
-///
-/// GLYPH ONLY, NO TEXT. The slot is 43 pt at its widest and the printer's
-/// ring already spends 14 of them with 25 for a four-character time. There
-/// is no honest four-character form of "FlClashX", and an invented
-/// abbreviation in the menu bar is worse than no text — so this takes the
-/// 14 pt the ring takes and leaves the rest, and the name lives in the
-/// tooltip and in the panel.
-struct TunnelStripSlot: View {
-    let metrics: TunnelMetrics
-
-    var body: some View {
-        Image(systemName: "arrow.triangle.branch")
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(metrics.carryingTool != nil
-                             ? TunnelPalette.carrying
-                             : TunnelPalette.unnamed)
-            .frame(width: IslandMetrics.ringDiameter,
-                   height: IslandMetrics.ringDiameter)
-            .help(Self.tooltip(metrics))
-    }
-
-    static func tooltip(_ m: TunnelMetrics) -> String {
-        var parts: [String] = [TunnelWords.headline(m)]
-        if let carrier = m.carrier { parts.append(carrier.interface) }
-        if let def = m.defaultRouteInterface { parts.append("маршрут по умолчанию \(def)") }
-        return parts.joined(separator: " · ")
-    }
-}
-
 // MARK: - The 560 x 186 body
 //
 //   22  headline          tool name + badge
@@ -598,7 +565,13 @@ enum TunnelProbe {
         print("  deservesStripSlot : " + (m.deservesStripSlot.map { $0 ? "true" : "false" } ?? "— (не измерено)"))
         print("  чип в рейке       : " + (live ? "ДА, «Туннель»" : "нет"))
         print("  строка футера     : " + (TunnelWords.footerClause(m) ?? "— (nil)"))
-        print("  слот в полоске    : " + (live ? "глиф ветки, подсказка «\(TunnelStripSlot.tooltip(m))»" : "пусто"))
+        // The tunnel no longer claims the collapsed strip's slot at all, so
+        // there is nothing to report here — this line used to describe a
+        // glyph that is never drawn. `deservesStripSlot` is kept because it
+        // is still the honest "is this worth mentioning" predicate that the
+        // rail chip and the footer both read. The reasoning for dropping the
+        // slot is beside IslandModel.updateTrailingSlot.
+        print("  слот в полоске    : не претендует (всегда пусто)")
         print("")
 
         print("--- TUNNEL INTERFACES UP RIGHT NOW ---------------------------------")
