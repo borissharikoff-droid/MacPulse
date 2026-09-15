@@ -15,10 +15,11 @@ import SwiftUI
 // is 0.5 pt of clearance. It holds the pressure dot and it will never
 // hold anything else, because there is nowhere for it to go.
 //
-// TRAILING (right of the housing) has 172.5 pt before the first menu bar
-// extra and is the only expandable surface the collapsed island has. It
-// rests at 26 pt and grows on request up to the runtime bound in
-// IslandMetrics.
+// TRAILING (right of the housing) is the only expandable surface the
+// collapsed island has. It rests at 26 pt and grows on request up to the
+// bound in IslandMetrics — which is derived from our OWN status item and
+// from the widest row the wing can draw, never from where some other
+// app's menu bar extra was once measured to be.
 //
 // WHAT IS IN THE TRAILING WING NOW. Two things, and they are not equals:
 //
@@ -95,7 +96,19 @@ struct IslandTrailingWing: View {
     var body: some View {
         let l = layout
         HStack(spacing: 0) {
-            Spacer(minLength: 0).frame(width: IslandMetrics.slotLeadingGap)
+            // EVERY RIGID WIDTH IN THIS ROW COMES FROM `l`, INCLUDING THE
+            // GAPS. This lead-in used to be an unconditional
+            // `.frame(width: IslandMetrics.slotLeadingGap)` sitting ABOVE
+            // the `slotWidth > 0` test, so with no print and the mic dot up
+            // the row's rigid minimum was 7 + 23 = 30 pt inside a 26 pt
+            // wing: the flexible Spacer below collapsed to nothing and the
+            // privacy rail was pushed 4 pt off the plate. `l.leadingGap` is
+            // 0 when there is no slot to lead in to, and
+            // `IslandMetrics.trailingLayout` is the only place that decides
+            // it — which is also what `--wing-probe` now checks.
+            if l.leadingGap > 0 {
+                Spacer(minLength: 0).frame(width: l.leadingGap)
+            }
 
             if l.slotWidth > 0, let reading = model.printer {
                 PrintStripSlot(reading: reading, showsText: l.showsSlotText)

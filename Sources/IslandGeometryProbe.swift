@@ -48,8 +48,13 @@ enum IslandGeometryProbe {
                                                     notchWidth: notch.width)
         print("status item minX \(statusItemX.map(fmt) ?? "unknown (probe has no status item)")")
         print("trailing limit   \(fmt(limit)) pt "
-              + "(ceiling \(fmt(IslandMetrics.maxTrailingWingWidth)), "
-              + "clearance \(fmt(IslandMetrics.statusItemClearance)))")
+              + "(ceiling \(fmt(IslandMetrics.maxTrailingWingWidth)) = the widest row the wing "
+              + "can draw, clearance \(fmt(IslandMetrics.statusItemClearance)))")
+        if statusItemX == nil {
+            print("                 no --status-item-x, so the wing REFUSES TO GROW and stays")
+            print("                 at the resting \(fmt(IslandMetrics.restingWingWidth)) pt. "
+                  + "Pass --status-item-x 952 for this machine's real bound.")
+        }
         print("")
 
         // A stand-in for the real geometry: the same maths NotchGeometry
@@ -136,23 +141,34 @@ enum IslandGeometryProbe {
               + "resting wing (\(fmt(IslandMetrics.restingWingWidth)) pt)")
 
         print("")
-        print("  wing   privacy  slot  slot-text  rail   spent / wing")
-        print("  -----  -------  ----  ---------  -----  ------------")
+        print("  wing   privacy  print  lead  slot  slot-text  rail   spent / wing")
+        print("  -----  -------  -----  ----  ----  ---------  -----  ------------")
+        // BOTH axes, and `printing: false` FIRST, because the state this
+        // table used to skip entirely is the commonest one this feature
+        // ever sees: no print, mic in use, wing at rest. That row is where
+        // the rail was being pushed off the plate.
         for wing in [IslandMetrics.restingWingWidth, 40, 60, limit,
                      IslandMetrics.maxTrailingWingWidth] as [CGFloat] {
+          for slot in [false, true] {
             for privacy in [false, true] {
                 let l = IslandMetrics.trailingLayout(wing: wing,
                                                      privacyVisible: privacy,
-                                                     slotVisible: true)
-                let spent = (l.slotWidth > 0 ? IslandMetrics.slotLeadingGap + l.slotWidth : 0)
-                    + (l.railWidth > 0 && l.slotWidth > 0 ? IslandMetrics.slotGap : 0)
-                    + l.railWidth
+                                                     slotVisible: slot)
+                // `l.spent` and not a formula retyped here. The previous
+                // version of this probe recomputed the sum by hand and
+                // omitted the slot lead-in in exactly the same way the view
+                // applied it unconditionally — so it printed "OK — every
+                // invariant held" for a row that really drew 30 pt into a
+                // 26 pt wing. A probe that re-derives what it is checking
+                // can only ever catch the bugs it happens not to share.
+                let spent = l.spent
 
                 // INVARIANT 6 — the contents never draw wider than the
                 // wing. Pixels outside the wing are pixels outside the hit
                 // rect, where clicks go to the menu bar instead of to us.
                 check(spent <= wing + 0.01,
-                      "wing \(fmt(wing)) privacy=\(privacy): contents spend \(fmt(spent)) pt")
+                      "wing \(fmt(wing)) privacy=\(privacy) slot=\(slot): "
+                      + "contents spend \(fmt(spent)) pt")
 
                 // INVARIANT 7 — when a sensor is in use the rail is drawn
                 // at FULL width at every wing width the model can grant.
@@ -162,11 +178,14 @@ enum IslandGeometryProbe {
                 }
 
                 print("  " + pad(fmt(wing), 5) + "  " + pad(privacy ? "on" : "off", 7)
+                      + "  " + pad(slot ? "on" : "off", 5)
+                      + "  " + pad(fmt(l.leadingGap), 4)
                       + "  " + pad(fmt(l.slotWidth), 4)
                       + "  " + pad(l.showsSlotText ? "yes" : "no", 9)
                       + "  " + pad(fmt(l.railWidth), 5)
                       + "  " + pad(fmt(spent), 5) + " / " + fmt(wing))
             }
+          }
         }
 
         // The opened panel: 560 x 280, centred, and it does not grow.

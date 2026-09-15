@@ -39,9 +39,43 @@ import CoreGraphics
 //
 //     952 - 40 clearance - 735 midX - 91.5 half-notch - 6 fillet = 79.5 pt
 //
-// so a feature that asks for the full 156 gets 79.5 here. Design the
-// trailing slot for what `IslandModel.trailingWingWidth` actually is
-// after the request, never for what you asked for — and never for 156.
+// Design the trailing slot for what `IslandModel.trailingWingWidth`
+// actually is after the request, never for what you asked for.
+//
+// ---------------------------------------------------------------------
+// WHAT BOUNDS THE WING AGAINST *OTHER* APPS' MENU BAR EXTRAS — read this
+// before raising any ceiling in here.
+//
+// Nothing in this process can see another app's menu bar extra. There is
+// no unprivileged API for it: the only route is the Accessibility tree,
+// which needs a grant this app does not ask for. So the wing is bounded
+// by two things we CAN observe, and by nothing else:
+//
+//   1. OUR OWN status item's window position (`trailingWingLimit`), which
+//      needs no permission because the window is ours; and
+//
+//   2. THE LEFTMOST POSITION OUR OWN ITEM HAS EVER HELD on this screen
+//      configuration (`IslandController.observedStatusItemMinX`). Extras
+//      are packed contiguously from the right edge of the menu bar, so
+//      when one is added every item to its left — ours included — shifts
+//      left, and when the user Command-drags OUR item rightwards the
+//      others close the gap behind it. The low-water mark of our own
+//      minX is therefore a decent estimate of where the extras region
+//      begins, and it is the ONLY estimate available without a
+//      permission prompt. It is conservative in the right direction: if
+//      an extra is removed the region really shrinks to the right and we
+//      simply keep the smaller, older bound.
+//
+// The ceiling below used to be 156 — "172.5 pt of measured clearance
+// minus a margin", i.e. a one-off measurement of where a DIFFERENT app's
+// extra happened to sit on this machine on one day. That is not a bound,
+// it is an anecdote, and with our own item dragged to the right of the
+// others the wing would happily grow to it and cover somebody else's
+// icon, taking their clicks (an armed panel sets
+// `ignoresMouseEvents = false` over everything it draws). The ceiling is
+// now derived from what the CONTENTS can use, which is a real bound: the
+// wing cannot be wider than the widest row it is able to draw, no matter
+// what anyone measured.
 // =====================================================================
 
 enum IslandMetrics {
@@ -52,10 +86,23 @@ enum IslandMetrics {
     /// padding, and nothing else.
     static let restingWingWidth: CGFloat = 26
 
-    /// Hard ceiling for the TRAILING wing. 172.5 pt of measured clearance
-    /// minus a margin, rounded down. The runtime bound
-    /// (`trailingWingLimit`) can only make this smaller, never larger.
-    static let maxTrailingWingWidth: CGFloat = 156
+    /// Hard ceiling for the TRAILING wing: EXACTLY what the widest row the
+    /// wing can draw needs, and not one point more —
+    ///
+    ///     7 lead-in + 14 ring + 4 gap + 25 text + 4 gap + 23 rail = 77
+    ///
+    /// It is defined as that sum rather than written as 77, so it cannot
+    /// drift from the layout it bounds. This is a BOUND, in a way the old
+    /// 156 was not: 156 was where a different app's menu bar extra was
+    /// measured to sit on this machine on one particular day, and this
+    /// process cannot see other apps' extras at all (see the header). A
+    /// ceiling derived from our own contents is one we can actually
+    /// justify — the wing is never wider than it has anything to put in.
+    ///
+    /// The runtime bound (`trailingWingLimit`) can only make this smaller,
+    /// never larger.
+    static let maxTrailingWingWidth: CGFloat =
+        slotLeadingGap + ringDiameter + ringTextGap + slotTextWidth + slotGap + privacyRailWidth
 
     /// The LEADING wing is not a variable. 0.5 pt of measured clearance.
     /// If you are here to widen it: measure where the frontmost app's
@@ -81,18 +128,25 @@ enum IslandMetrics {
     //
     // THE LIVE SLOT is whatever the arbiter picked (print progress, this
     // phase) and gets what is left after the rail. THE WORST CASE — both
-    // privacy dots up while a print runs, on this machine's real 79.5 pt
-    // grant — is the case the numbers below are tuned for, because it is
-    // the one where the feature has least room and still has to be legible:
+    // privacy dots up while a print runs — is the case the numbers below
+    // are tuned for, because it is the one where the feature has least room
+    // and still has to be legible:
     //
-    //     79.5 granted - 7 lead-in - 23 rail - 4 gap = 45.5 pt available
-    //     14 ring + 4 gap + 25 text                  = 43   pt needed
+    //     77 ceiling - 7 lead-in - 23 rail - 4 gap = 43 pt available
+    //     14 ring + 4 gap + 25 text               = 43 pt needed
     //
-    // 2.5 pt of margin, and it was measured rather than guessed: the widest
-    // string `PrinterFeature.remaining` can produce is "1ч23"/"9ч59", which
-    // lays out at 23.4 pt in 9 pt medium monospaced digits (that is also
-    // why the formatter drops the minutes past ten hours — "23ч59" needs
-    // 29.3 pt and would truncate here).
+    // Exactly, by construction: `maxTrailingWingWidth` IS that sum, so the
+    // ceiling and the widest row cannot drift apart. (This machine's
+    // runtime bound grants 79.5 pt, so the ceiling is what binds here and
+    // the plate is 2.5 pt narrower than it could be — which is the right
+    // way round: unused width is width that cannot cover anybody else's
+    // menu bar extra.)
+    //
+    // The text width was measured rather than guessed: the widest string
+    // `PrinterFeature.remaining` can produce is "1ч23"/"9ч59", which lays
+    // out at 23.4 pt in 9 pt medium monospaced digits (that is also why the
+    // formatter drops the minutes past ten hours — "23ч59" needs 29.3 pt
+    // and would truncate here).
     //
     // Below the text width the text is dropped and the ring stands alone;
     // below the ring the slot disappears entirely and only the rail
@@ -126,30 +180,55 @@ enum IslandMetrics {
     /// and for the same reason. Pure, so `--wing-probe` can check it at
     /// every width the model will grant.
     struct TrailingLayout: Equatable {
+        /// Clearance between the camera housing and the first pixel of the
+        /// slot. ZERO WHEN THERE IS NO SLOT — it is the slot's lead-in, not
+        /// the wing's padding, and it is in this struct rather than read
+        /// straight off `IslandMetrics` by the view for exactly that
+        /// reason. `IslandStrip` used to draw a RIGID 7 pt box before the
+        /// `slotWidth > 0` test, so in the commonest state of the whole
+        /// feature — mic in use, printer off — the row's minimum was
+        /// 7 + 0 + 23 = 30 pt inside a 26 pt wing, the flexible spacer
+        /// collapsed, and the privacy dots were pushed 4 pt past the right
+        /// edge of the plate. `--wing-probe` said "OK" throughout, because
+        /// its own `spent` formula omitted the same 7 pt. Two copies of a
+        /// layout rule is how the drawn thing and the checked thing drift
+        /// apart; now there is one copy and both read it.
+        let leadingGap: CGFloat
         /// 0 when the slot did not fit at all.
         let slotWidth: CGFloat
         /// False when only the ring fits.
         let showsSlotText: Bool
+        /// Between the slot and the rail. 0 unless both are present.
+        let slotRailGap: CGFloat
         /// 0 when no sensor is in use.
         let railWidth: CGFloat
+
+        /// Exactly what the HStack in `IslandStrip` lays out, in order.
+        /// This is what must never exceed the wing.
+        var spent: CGFloat { leadingGap + slotWidth + slotRailGap + railWidth }
     }
 
     static func trailingLayout(wing: CGFloat,
                                privacyVisible: Bool,
                                slotVisible: Bool) -> TrailingLayout {
         let rail = privacyVisible ? min(privacyRailWidth, wing) : 0
-        guard slotVisible else {
-            return TrailingLayout(slotWidth: 0, showsSlotText: false, railWidth: rail)
+        func railOnly() -> TrailingLayout {
+            TrailingLayout(leadingGap: 0, slotWidth: 0, showsSlotText: false,
+                           slotRailGap: 0, railWidth: rail)
         }
-        let spare = wing - slotLeadingGap - rail - (rail > 0 ? slotGap : 0)
-        guard spare >= ringDiameter else {
-            return TrailingLayout(slotWidth: 0, showsSlotText: false, railWidth: rail)
-        }
+        guard slotVisible else { return railOnly() }
+
+        let gap = rail > 0 ? slotGap : 0
+        let spare = wing - slotLeadingGap - rail - gap
+        guard spare >= ringDiameter else { return railOnly() }
+
         let withText = ringDiameter + ringTextGap + slotTextWidth
-        if spare >= withText {
-            return TrailingLayout(slotWidth: withText, showsSlotText: true, railWidth: rail)
-        }
-        return TrailingLayout(slotWidth: ringDiameter, showsSlotText: false, railWidth: rail)
+        let slot = spare >= withText ? withText : ringDiameter
+        return TrailingLayout(leadingGap: slotLeadingGap,
+                              slotWidth: slot,
+                              showsSlotText: spare >= withText,
+                              slotRailGap: gap,
+                              railWidth: rail)
     }
 
     // MARK: - Plate
@@ -252,16 +331,23 @@ enum IslandMetrics {
     /// MacPulse's own menu bar item.
     ///
     /// `statusItemMinX` comes from `statusItem.button?.window?.frame.minX`,
-    /// which needs no permission of any kind — it is our own window. It is
-    /// nil before the status item has a window, and on any screen
-    /// configuration where the item is not on this screen; then only the
-    /// static ceiling applies.
+    /// which needs no permission of any kind — it is our own window. The
+    /// caller passes the LEFTMOST position it has seen that window hold on
+    /// this screen configuration, not merely the current one; see the
+    /// header for why the low-water mark is the better bound.
+    ///
+    /// It is nil before the status item has a window, and on any screen
+    /// configuration where the item is not on this screen. IT THEN REFUSES
+    /// TO GROW — the wing stays at rest. It used to fall back to the
+    /// static ceiling, which meant "we have no idea where our own icon is,
+    /// so draw 156 pt of island into the menu bar and hope". The absence
+    /// of a measurement is not a licence to expand.
     ///
     /// Pure, so it can be checked with synthetic inputs (`--wing-probe`).
     static func trailingWingLimit(statusItemMinX: CGFloat?,
                                   screenMidX: CGFloat,
                                   notchWidth: CGFloat) -> CGFloat {
-        guard let statusItemMinX else { return maxTrailingWingWidth }
+        guard let statusItemMinX else { return restingWingWidth }
         // Right edge of the drawn plate at wing width w:
         //     screenMidX + notchWidth/2 + w + collapsedFillet
         // and that must stay `statusItemClearance` short of the item.

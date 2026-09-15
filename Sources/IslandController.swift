@@ -241,10 +241,31 @@ final class IslandController {
     /// sit under MacPulse's own menu bar item, and hand the bound to the
     /// model. Called at launch, on every screen-parameter change, and
     /// whenever the status item's window moves.
+    /// The LEFTMOST x our own status item has been seen at since the last
+    /// screen-configuration change. See the bound discussion in the header
+    /// of IslandMetrics: this process cannot see other apps' menu bar
+    /// extras at all, and this low-water mark is the only observable that
+    /// says anything about where their region begins.
+    ///
+    /// Reset — not carried — when the screens change, because a different
+    /// display arrangement is a different menu bar and the old number means
+    /// nothing on it.
+    private var observedStatusItemMinX: CGFloat?
+
     private func refreshTrailingWingLimit() {
         guard let geometry else { return }
+        if let now = statusItemMinX?() {
+            observedStatusItemMinX = min(observedStatusItemMinX ?? now, now)
+        }
+        // Menu bar extras are packed contiguously from the right edge, so
+        // when the user Command-drags OUR item rightwards the others close
+        // the gap behind it and the leftmost foreign extra ends up roughly
+        // where we used to be. Bounding against the low-water mark rather
+        // than the current position is what stops the wing from expanding
+        // into that space and swallowing their clicks. Where our item has
+        // only ever been in one place the two are identical.
         let limit = IslandMetrics.trailingWingLimit(
-            statusItemMinX: statusItemMinX?(),
+            statusItemMinX: observedStatusItemMinX,
             screenMidX: geometry.screenFrame.midX,
             notchWidth: geometry.notchSize.width
         )
@@ -502,7 +523,12 @@ final class IslandController {
         rebuildForCurrentScreens()
         restartMonitors()
         // A different screen means a different midX and a different place
-        // for the status item, so the wing's ceiling has to be redone.
+        // for the status item, so the wing's ceiling has to be redone —
+        // from scratch. The low-water mark of our own item's position is
+        // only meaningful for one menu bar layout; carrying it across a
+        // display change would bound this screen's wing with another
+        // screen's geometry.
+        observedStatusItemMinX = nil
         refreshTrailingWingLimit()
     }
 
