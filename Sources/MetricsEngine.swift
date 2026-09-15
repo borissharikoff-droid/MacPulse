@@ -65,7 +65,11 @@ public final class MetricsEngine {
     private var observers: [MetricsObserverToken: (MetricsSnapshot) -> Void] = [:]
     private var nextObserverID: UInt64 = 1
     private var isRunning = false
+    /// Both notification tokens are held so `stop()` can remove them. A token
+    /// that is dropped on the floor is an observer that lives until the
+    /// process exits and keeps firing after stop().
     private var thermalObserver: NSObjectProtocol?
+    private var powerStateObserver: NSObjectProtocol?
 
     // MARK: - Sampling-queue state (NEVER touch from main)
 
@@ -137,6 +141,10 @@ public final class MetricsEngine {
         if let thermalObserver {
             NotificationCenter.default.removeObserver(thermalObserver)
             self.thermalObserver = nil
+        }
+        if let powerStateObserver {
+            NotificationCenter.default.removeObserver(powerStateObserver)
+            self.powerStateObserver = nil
         }
     }
 
@@ -304,10 +312,14 @@ public final class MetricsEngine {
             }
         }
         apply()
+        // BOTH tokens are stored. addObserver(forName:) returns an opaque
+        // observer object that NotificationCenter owns until it is removed;
+        // discarding the return value leaves a subscription that cannot be
+        // cancelled and that keeps calling `apply` after stop().
         thermalObserver = NotificationCenter.default.addObserver(
             forName: ProcessInfo.thermalStateDidChangeNotification,
             object: nil, queue: .main) { _ in apply() }
-        NotificationCenter.default.addObserver(
+        powerStateObserver = NotificationCenter.default.addObserver(
             forName: .NSProcessInfoPowerStateDidChange,
             object: nil, queue: .main) { _ in apply() }
     }
