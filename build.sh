@@ -32,7 +32,41 @@ if find "$ROOT/Sources" -mindepth 2 -name '*.swift' -print -quit | grep -q .; th
   find "$ROOT/Sources" -mindepth 2 -name '*.swift' >&2
   exit 1
 fi
+
+# ============================================================================
+# CONTRACT GUARD (source side). Runs BEFORE the compile so a violation costs
+# two seconds, not two minutes.
 #
+# MacPulse links no CFNetwork, no Network.framework and no Security.framework,
+# and `otool -L` is asserted below to prove it. But since Sources/PultLink.swift
+# added ONE raw POSIX loopback socket — the 3D printer panel on 127.0.0.1:8787
+# — otool alone is no longer a sufficient check: libSystem is already linked, so
+# a second, less careful socket somewhere else would not show up in the link map
+# at all. Hence a source-level guard as well.
+#
+# Comment lines are stripped first, on purpose: PultLink.swift's header has to
+# be able to EXPLAIN why URLSession is forbidden without tripping the rule that
+# forbids it.
+# ============================================================================
+BANNED='URLSession|NSURLConnection|NWConnection|NWBrowser|NWListener|getaddrinfo|gethostbyname|gethostbyaddr|CFHost|CFStream|SecureTransport|SecTrust|CFSocket'
+if BAD=$(grep -nE "$BANNED" "$ROOT"/Sources/*.swift | grep -vE ':[0-9]+:[[:space:]]*//'); then
+  echo "error: CONTRACT — networking API in Sources/. MacPulse does not do general" >&2
+  echo "       networking; the ONE exception is the loopback socket in PultLink.swift." >&2
+  echo "$BAD" >&2
+  exit 1
+fi
+# Exactly one file is allowed to open a socket at all.
+if STRAY=$(grep -nE '(^|[^A-Za-z_])(socket|connect|getaddrinfo)[[:space:]]*\(' \
+             "$ROOT"/Sources/*.swift \
+           | grep -vE ':[0-9]+:[[:space:]]*//' \
+           | grep -v '/PultLink\.swift:'); then
+  echo "error: CONTRACT — socket()/connect() outside Sources/PultLink.swift." >&2
+  echo "       Every byte that leaves this process must go through that one file," >&2
+  echo "       which can only ever form the address 127.0.0.1:8787." >&2
+  echo "$STRAY" >&2
+  exit 1
+fi
+
 # IOKit covers AppleSMC, IOAccelerator, IOBlockStorageDriver, the device tree
 # and IOKit.ps. libIOReport is NOT linked here — PowerSampler resolves it with
 # dlopen/dlsym so a missing private symbol degrades to "power unavailable"
@@ -52,6 +86,24 @@ swiftc -O \
   -o "$BIN_PATH" \
   "$ROOT"/Sources/*.swift \
   -framework AppKit -framework ServiceManagement -framework IOKit
+
+# ============================================================================
+# CONTRACT GUARD (link side). The single most important check in the build.
+#
+# The reviewed property is "MacPulse cannot do general networking". These three
+# frameworks are what a binary needs in order to resolve a hostname, open a TLS
+# connection, or talk to anything that is not already a file descriptor. If any
+# of them appears here, something in Sources/ started using URLSession, Network
+# or TLS and the property is gone — fail the build rather than ship it.
+# ============================================================================
+if LEAK=$(otool -L "$BIN_PATH" \
+          | grep -E '/(CFNetwork|Network|Security)\.framework/'); then
+  echo "error: CONTRACT — a networking framework is in the link map:" >&2
+  echo "$LEAK" >&2
+  rm -f "$BIN_PATH"
+  exit 1
+fi
+echo "==> Contract OK: no CFNetwork, no Network.framework, no Security.framework."
 
 cp "$ROOT/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 
