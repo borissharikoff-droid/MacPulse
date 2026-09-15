@@ -96,7 +96,9 @@ final class CPUSampler {
         var info: processor_info_array_t?
         var infoCount: mach_msg_type_number_t = 0
 
-        guard host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO,
+        // MachHost.port, never mach_host_self() — see MachHost in
+        // SamplingSupport.swift.
+        guard host_processor_info(MachHost.port, PROCESSOR_CPU_LOAD_INFO,
                                   &cpuCount, &info, &infoCount) == KERN_SUCCESS,
               let array = info else { return nil }
 

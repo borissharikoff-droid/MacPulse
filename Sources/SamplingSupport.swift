@@ -6,6 +6,34 @@ import IOKit
 // queue-agnostic and free of state unless noted.
 // =====================================================================
 
+/// THE host-name port. Taken ONCE, for the life of the process.
+///
+/// `mach_host_self()` is not a getter. Every call inserts a send right for the
+/// host-name port into this task's IPC space, i.e. it hands back a name whose
+/// USER-REFERENCE COUNT has just been incremented, and the caller owns that
+/// reference. Calling it on the sample path — once per tick in
+/// `host_statistics64`, once in `host_processor_info`, at 1 Hz, from login,
+/// for days — grows the reference count without bound. MEASURED on this
+/// machine (macOS 26.6, M2): the count climbs by exactly 2 per tick and is
+/// clamped by the kernel at MACH_PORT_UREFS_MAX - 1 = 65535, which a 1 Hz app
+/// reaches in about 9 hours.
+///
+/// The fix is to take the right once and reuse the name. The alternative —
+/// `mach_port_deallocate(mach_task_self_, port)` after every call — is also
+/// correct for a name obtained this way (it drops exactly the one user
+/// reference `mach_host_self()` added), but it puts two extra traps on the hot
+/// path for no benefit.
+///
+/// This right is deliberately NEVER deallocated: it is held until the process
+/// exits, exactly like the task port. Deallocating it would invalidate the
+/// name every sampler here depends on.
+///
+/// `static let` is initialised exactly once, lazily and thread-safely, so the
+/// single reference is taken on whichever queue samples first.
+enum MachHost {
+    static let port: mach_port_t = mach_host_self()
+}
+
 /// Monotonic clock. Used for EVERY dt in the engine.
 ///
 /// `Date()` is wall-clock: NTP steps, sleep/wake and DST can move it
@@ -90,7 +118,7 @@ struct HostInfo {
 
     private init() {
         var ps: vm_size_t = 0
-        host_page_size(mach_host_self(), &ps)
+        host_page_size(MachHost.port, &ps)
         pageSize = ps == 0 ? 16384 : UInt64(ps)
 
         physicalMemoryBytes = Sysctl.uint64("hw.memsize") ?? 0

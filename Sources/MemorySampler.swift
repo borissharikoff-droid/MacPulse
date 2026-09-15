@@ -169,7 +169,10 @@ final class MemorySampler {
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size)
         let result = withUnsafeMutablePointer(to: &stats) { ptr -> kern_return_t in
             ptr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+                // MachHost.port, never mach_host_self(): the latter takes a
+                // fresh send right on every call and this runs once a second
+                // forever. See MachHost in SamplingSupport.swift.
+                host_statistics64(MachHost.port, HOST_VM_INFO64, $0, &count)
             }
         }
         return result == KERN_SUCCESS ? stats : nil
