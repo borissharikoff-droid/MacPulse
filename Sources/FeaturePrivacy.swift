@@ -114,7 +114,17 @@ final class PrivacyWatcher {
     private let queue = DispatchQueue(label: "com.local.macpulse.privacy", qos: .utility)
 
     private weak var model: IslandModel?
+    /// MAIN THREAD. What `start()`/`stop()` were told.
     private var running = false
+    /// THE PRIVACY QUEUE'S OWN copy of the same fact, and the one every
+    /// piece of queue-side work is guarded on.
+    ///
+    /// `running` alone was not enough: `start()` schedules the first camera
+    /// enumeration five seconds out, and a `stop()` inside that window was
+    /// followed by a full listener install anyway, because the block that
+    /// did the installing never asked. Main-thread state cannot be read
+    /// from the queue without a race, so the queue keeps its own.
+    private var queueRunning = false
 
     // ---- CoreAudio ----
     private var systemListeners: [(AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
@@ -139,20 +149,38 @@ final class PrivacyWatcher {
         precondition(Thread.isMainThread)
         guard !running else { return }
         running = true
-        queue.async { [weak self] in self?.installAudioListeners() }
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.queueRunning = true
+            self.installAudioListeners()
+        }
         queue.asyncAfter(deadline: .now() + enumerateDelay) { [weak self] in
-            self?.installCameraListeners()
-            self?.scan()
+            guard let self, self.queueRunning else { return }
+            self.installCameraListeners()
+            self.scan()
         }
     }
 
+    /// Symmetric with `start()` — ALL of it. Both halves.
+    ///
+    /// The camera half used to be one listener short: `removeCameraListeners`
+    /// took down the per-device `IsRunningSomewhere` listeners but never the
+    /// system-wide `kCMIOHardwarePropertyDevices` one, and that listener's
+    /// block re-installs the whole per-device set whenever a camera is
+    /// plugged in. So a stopped watcher came back to life the next time a
+    /// webcam or a Continuity Camera appeared. `queueRunning` closes the
+    /// other half of it: the delayed enumeration scheduled five seconds
+    /// into `start()` no longer runs after a `stop()` inside that window.
     func stop() {
         precondition(Thread.isMainThread)
         guard running else { return }
         running = false
         queue.async { [weak self] in
-            self?.removeAudioListeners()
-            self?.removeCameraListeners()
+            guard let self else { return }
+            self.queueRunning = false
+            self.removeAudioListeners()
+            self.removeCameraListeners()
+            self.removeCameraListListener()
         }
     }
 
@@ -256,13 +284,14 @@ final class PrivacyWatcher {
         // Continuity Camera and USB webcams come and go; re-enumerate when
         // the device list itself changes.
         guard cameraListListener == nil else { return }
-        var listAddress = CMIOObjectPropertyAddress(
-            mSelector: CMIOObjectPropertySelector(kCMIOHardwarePropertyDevices),
-            mScope: CMIOObjectPropertyScope(kCMIOObjectPropertyScopeGlobal),
-            mElement: CMIOObjectPropertyElement(kCMIOObjectPropertyElementMain))
+        var listAddress = Self.deviceListAddress()
         let block: CMIOObjectPropertyListenerBlock = { [weak self] _, _ in
             guard let self else { return }
             self.queue.async {
+                // A camera appearing after stop() must NOT bring the whole
+                // per-device listener set back up. This is the guard that
+                // was missing.
+                guard self.queueRunning else { return }
                 self.installCameraListeners()
                 self.scan()
             }
@@ -284,6 +313,26 @@ final class PrivacyWatcher {
         cameraListeners.removeAll()
     }
 
+    /// The system-wide device-list listener. Deliberately NOT removed by
+    /// `removeCameraListeners`, which `installCameraListeners` calls on
+    /// every re-enumeration — taking it down and putting it back on every
+    /// hot-plug would be pointless churn. It is removed exactly once, by
+    /// `stop()`.
+    private func removeCameraListListener() {
+        guard let block = cameraListListener else { return }
+        var address = Self.deviceListAddress()
+        CMIOObjectRemovePropertyListenerBlock(CMIOObjectID(kCMIOObjectSystemObject),
+                                              &address, queue, block)
+        cameraListListener = nil
+    }
+
+    private static func deviceListAddress() -> CMIOObjectPropertyAddress {
+        CMIOObjectPropertyAddress(
+            mSelector: CMIOObjectPropertySelector(kCMIOHardwarePropertyDevices),
+            mScope: CMIOObjectPropertyScope(kCMIOObjectPropertyScopeGlobal),
+            mElement: CMIOObjectPropertyElement(kCMIOObjectPropertyElementMain))
+    }
+
     // MARK: - Scanning
 
     /// Coalesce. A single app starting a capture session emits several
@@ -293,10 +342,10 @@ final class PrivacyWatcher {
     /// "nobody". Hence two scans — one prompt, one late enough to have
     /// caught up.
     private func requestScan() {
-        guard !scanPending else { return }
+        guard queueRunning, !scanPending else { return }
         scanPending = true
         queue.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            guard let self else { return }
+            guard let self, self.queueRunning else { self?.scanPending = false; return }
             // Cleared only AFTER the prompt scan, so a burst that arrives
             // inside the coalescing window collapses to one pair of scans
             // rather than one pair EACH. A scan is ~70 synchronous property
@@ -306,7 +355,8 @@ final class PrivacyWatcher {
             self.scanPending = false
         }
         queue.asyncAfter(deadline: .now() + 0.45) { [weak self] in
-            self?.scan()
+            guard let self, self.queueRunning else { return }
+            self.scan()
         }
     }
 
