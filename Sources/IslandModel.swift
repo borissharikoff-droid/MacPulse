@@ -174,16 +174,22 @@ final class IslandModel: ObservableObject {
 
     // ---- features that are not driven by MetricsEngine ----
     //
-    // This one is EVENT-DRIVEN and publishes only when its own displayed
-    // value changes, which is the hard rule from the measurements at the
-    // top of this file: it moves when a sensor actually starts or stops,
-    // and on a normal day that is never.
+    // Both of these are EVENT-DRIVEN or slow-polled and publish only when
+    // their own displayed value changes, which is the hard rule from the
+    // measurements at the top of this file. The printer moves at most
+    // once every 8 s while a print is live and not at all otherwise; the
+    // privacy rail moves only when a sensor actually starts or stops.
 
+    /// The current print, or nil for "there is no print worth a pixel".
+    /// nil is the normal state — the printer is powered off most of the
+    /// time — and it means no chip, no ring, no footer clause.
+    @Published private(set) var printer: PrinterReading?
     /// Who is holding the microphone, and whether a camera is on.
     @Published private(set) var privacy = PrivacyState()
 
     private let iconCache = AppIconCache()
     private var token: MetricsObserverToken?
+    private lazy var printerPoller = PrinterPoller(model: self)
     private lazy var privacyWatcher = PrivacyWatcher(model: self)
 
     // MARK: - Lifecycle
@@ -196,12 +202,14 @@ final class IslandModel: ObservableObject {
             self?.ingest(snap)
         }
         privacyWatcher.start()
+        printerPoller.start()
     }
 
     func stop() {
         if let token { MetricsEngine.shared.remove(token) }
         token = nil
         privacyWatcher.stop()
+        printerPoller.stop()
     }
 
     func setGeometry(notchSize: CGSize, hasPhysicalNotch: Bool) {
@@ -272,6 +280,9 @@ final class IslandModel: ObservableObject {
         guard status != new else { return }
         let wasOpen = status == .opened
         status = new
+        // The printer poller speeds up while somebody can see the answer
+        // and pulls a fresh reading the moment the panel opens.
+        printerPoller.setPanelOpen(new == .opened)
         if new == .opened && !wasOpen {
             // Refresh BEFORE selecting. `visibleSections` is whatever it
             // was when the panel last closed, and the strip slot's section
@@ -319,9 +330,9 @@ final class IslandModel: ObservableObject {
     /// Which chips the rail shows, and which one is selected.
     ///
     /// Split out of `refreshPanel` because a feature that is NOT driven by
-    /// MetricsEngine can come alive between two metric ticks, and the rail
-    /// would otherwise be up to a full tick out of date at exactly the
-    /// moment the user is looking at it.
+    /// MetricsEngine — the printer, say — can come alive between two
+    /// metric ticks, and the rail would otherwise be up to a full tick out
+    /// of date at exactly the moment the user is looking at it.
     private func refreshRouter() {
         // The rail lists only what is live. Memory always is, which is why
         // it is the fallback below and why the rail is never empty.
@@ -338,6 +349,15 @@ final class IslandModel: ObservableObject {
 
     // MARK: - Feature state
 
+    /// Called by `PrinterPoller` on the main thread after every poll.
+    func setPrinter(_ reading: PrinterReading?) {
+        precondition(Thread.isMainThread)
+        guard printer != reading else { return }
+        printer = reading
+        updateTrailingSlot()
+        if status == .opened { refreshRouter() }
+    }
+
     /// Called by `PrivacyWatcher` on the main thread when a sensor starts
     /// or stops.
     ///
@@ -352,6 +372,40 @@ final class IslandModel: ObservableObject {
         // The footer names the app in words. It is not a section, so
         // nothing else would refresh it.
         if status == .opened { refreshFooter() }
+    }
+
+    /// THE COLLAPSED STRIP'S SLOT ARBITER.
+    ///
+    /// The trailing wing shows exactly ONE thing, and which one is a
+    /// cross-feature question, so it cannot live inside any single
+    /// feature's file — priority is only meaningful relative to everything
+    /// else competing for the same 79.5 pt.
+    ///
+    /// Priority, by cost-of-missing-it (from the architecture spike):
+    ///   1. transient toast          — not built yet
+    ///   2. print progress           — the only feature with an
+    ///                                 UNRECOVERABLE deadline: hours of
+    ///                                 machine time and a spool of filament
+    ///   3. now playing / meeting / tunnel / shelf — not built yet
+    ///   0. nothing                  — the wing goes back to 26 pt
+    ///
+    /// The privacy rail is NOT in this list. It is pinned at the far right
+    /// of the wing and is drawn beside whatever wins here, never instead
+    /// of it.
+    private func updateTrailingSlot() {
+        if printer != nil {
+            // Ask for the ceiling and LAY OUT to what comes back. The
+            // runtime bound on this machine grants 79.5 pt, not 156 —
+            // MacPulse's own status item is at x=952, well left of the
+            // first foreign menu bar extra. Designing the slot for the
+            // requested width instead of the granted one is the bug this
+            // comment exists to prevent.
+            requestTrailingWing(IslandMetrics.maxTrailingWingWidth)
+            setStripSlotSection(.printer)
+        } else {
+            requestTrailingWing(IslandMetrics.restingWingWidth)
+            setStripSlotSection(.memory)
+        }
     }
 
     private func refreshFooter() {

@@ -49,6 +49,21 @@ enum IslandPalette {
     static let micInUse = Color(red: 1.00, green: 0.58, blue: 0.00)
     static let cameraInUse = Color(red: 0.22, green: 0.80, blue: 0.35)
 
+    /// The print ring when the panel could not tell us a filament colour.
+    static let printing = Color(red: 0.36, green: 0.72, blue: 1.00)
+
+    /// "#RRGGBB" from the printer's AMS, already validated by
+    /// `PrinterFeature.parse`. Anything else falls back rather than
+    /// trapping — this string came off the network into another process
+    /// before it reached us.
+    static func hex(_ string: String?, fallback: Color) -> Color {
+        guard let string, string.count == 7, string.hasPrefix("#"),
+              let value = UInt32(string.dropFirst(), radix: 16) else { return fallback }
+        return Color(red: Double((value >> 16) & 255) / 255,
+                     green: Double((value >> 8) & 255) / 255,
+                     blue: Double(value & 255) / 255)
+    }
+
     static func color(for level: MemoryPressureLevel?) -> Color {
         switch level {
         case .normal: return normal

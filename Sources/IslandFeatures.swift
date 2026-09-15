@@ -28,10 +28,20 @@ enum IslandFeatures {
         precondition(Thread.isMainThread)
 
         // >>> ADD YOUR SECTION HERE. One line. <<<
-        //
-        // IslandSectionRegistry.register(.printer)
+
+        // Bambu P1S, read from the user's own loopback panel. Its chip is
+        // absent unless a print is actually running — see
+        // IslandSectionPrinter.swift.
+        IslandSectionRegistry.register(.printer)
+
         // IslandSectionRegistry.register(.shelf)
         // IslandSectionRegistry.register(.clipboard)
         // IslandSectionRegistry.register(.tunnel)
+
+        // NOT A SECTION, ON PURPOSE: the mic/camera privacy rail. It is a
+        // dot in the trailing wing plus a line in the panel footer, and it
+        // gets no tab — a tab is something you navigate TO, and a safety
+        // signal has to be legible without navigating anywhere. See
+        // IslandPrivacyRail.swift.
     }
 }

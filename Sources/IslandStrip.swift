@@ -20,13 +20,15 @@ import SwiftUI
 // rests at 26 pt and grows on request up to the runtime bound in
 // IslandMetrics.
 //
-// WHAT IS IN THE TRAILING WING NOW. The PRIVACY RAIL, pinned at the far
-// right, which nothing may preempt and which is sized to fit inside the
-// resting 26 pt so it never has to ask for width at all. To its left is
-// ONE live slot for whatever the model's arbiter picks; no feature claims
-// it yet, so it is empty and the wing stays at 26.
+// WHAT IS IN THE TRAILING WING NOW. Two things, and they are not equals:
 //
-// The arithmetic for "what is left after the rail" is in
+//   * the PRIVACY RAIL, pinned at the far right, which nothing may
+//     preempt and which is sized to fit inside the resting 26 pt so it
+//     never has to ask for width at all;
+//   * ONE live slot to its left, whatever `IslandModel`'s arbiter picked
+//     — print progress this phase — which gets whatever is left.
+//
+// The arithmetic for "whatever is left" is in
 // `IslandMetrics.trailingLayout` and nowhere else, for the same reason
 // `collapsedPlate` is: two copies of a layout rule is how the drawn thing
 // and the hit-tested thing drift apart.
@@ -85,13 +87,18 @@ struct IslandTrailingWing: View {
     private var layout: IslandMetrics.TrailingLayout {
         IslandMetrics.trailingLayout(wing: availableWidth,
                                      privacyVisible: !model.privacy.isQuiet,
-                                     slotVisible: false)
+                                     slotVisible: model.printer != nil)
     }
 
     var body: some View {
         let l = layout
         HStack(spacing: 0) {
             Spacer(minLength: 0).frame(width: IslandMetrics.slotLeadingGap)
+
+            if l.slotWidth > 0, let reading = model.printer {
+                PrintStripSlot(reading: reading, showsText: l.showsSlotText)
+                    .frame(width: l.slotWidth, alignment: .leading)
+            }
 
             Spacer(minLength: 0)
 
