@@ -88,9 +88,15 @@ struct IslandTrailingWing: View {
     let availableWidth: CGFloat
 
     private var layout: IslandMetrics.TrailingLayout {
+        // ONE `slotVisible`, four possible occupants. The test must be the
+        // disjunction of every branch in the body below, or the layout
+        // reserves no width for a slot that then tries to draw.
         IslandMetrics.trailingLayout(wing: availableWidth,
                                      privacyVisible: !model.privacy.isQuiet,
-                                     slotVisible: model.printer != nil)
+                                     slotVisible: model.printer != nil
+                                                  || model.calendarStrip != nil
+                                                  || model.sound.hasOutput
+                                                  || model.tunnel?.deservesStripSlot == true)
     }
 
     var body: some View {
@@ -110,9 +116,29 @@ struct IslandTrailingWing: View {
                 Spacer(minLength: 0).frame(width: l.leadingGap)
             }
 
-            if l.slotWidth > 0, let reading = model.printer {
-                PrintStripSlot(reading: reading, showsText: l.showsSlotText)
-                    .frame(width: l.slotWidth, alignment: .leading)
+            // THE ORDER OF THESE BRANCHES IS THE ARBITER'S PRIORITY, and
+            // it must stay in step with `IslandModel.updateTrailingSlot` —
+            // that method picked which section the click navigates to, and
+            // drawing a different one here would open the wrong tab.
+            //
+            // Print, then meeting, then sound, then tunnel. The reasoning
+            // for that order is written out once, beside the arbiter.
+            if l.slotWidth > 0 {
+                if let reading = model.printer {
+                    PrintStripSlot(reading: reading, showsText: l.showsSlotText)
+                        .frame(width: l.slotWidth, alignment: .leading)
+                } else if let countdown = model.calendarStrip,
+                          let meeting = model.calendar.next {
+                    MeetingStripSlot(event: meeting, countdown: countdown,
+                                     showsText: l.showsSlotText)
+                        .frame(width: l.slotWidth, alignment: .leading)
+                } else if model.sound.hasOutput {
+                    SoundStripSlot(state: model.sound)
+                        .frame(width: l.slotWidth, alignment: .leading)
+                } else if let tunnel = model.tunnel, tunnel.deservesStripSlot == true {
+                    TunnelStripSlot(metrics: tunnel)
+                        .frame(width: l.slotWidth, alignment: .leading)
+                }
             }
 
             Spacer(minLength: 0)

@@ -196,10 +196,67 @@ final class IslandModel: ObservableObject {
     /// Who is holding the microphone, and whether a camera is on.
     @Published private(set) var privacy = PrivacyState()
 
+    // ---- the five sections added in the second wave ----
+    //
+    // SAME RULE AS ABOVE, and it is the only rule that matters here. Each
+    // of these is written by its own event source — a watcher, a poller,
+    // an engine observer — and every setter below compares before it
+    // assigns, so a sample that would draw the same pixels publishes
+    // nothing. NONE of them is written on the metrics tick, with one
+    // documented exception: `calendarStrip`, which is a function of the
+    // CLOCK and therefore cannot be event-driven. Its cost is one
+    // Optional read; see `refreshCalendarStrip()`.
+
+    /// Who is carrying this machine's traffic, from routing-table
+    /// evidence. nil until the first sample lands (12 s after launch), and
+    /// nil is "could not measure", never "no tunnel". Republished only
+    /// when something the section can draw actually changed — see
+    /// `TunnelMetrics.==`, which deliberately ignores the sample cost.
+    @Published private(set) var tunnel: TunnelMetrics?
+
+    /// The next meeting, or the engine's measured "there is none".
+    /// `hasState` is `next != nil`, so on a machine whose only calendar
+    /// events are all-day holidays this stays quiet for ever.
+    @Published private(set) var calendar = CalendarSnapshot(status: .off)
+
+    /// The COLLAPSED strip's countdown, already formatted ("12′"), or nil
+    /// for "no meeting has earned the slot". Non-nil for exactly the 15
+    /// minutes before a meeting starts. A STRING, re-derived on the tick,
+    /// because the collapsed island publishes almost nothing and a
+    /// countdown formatted inside the strip's view body would be drawn
+    /// once and then freeze at that minute.
+    @Published private(set) var calendarStrip: String?
+
+    /// Which apps have an audio OUTPUT STREAM open. Empty is the normal
+    /// state and means no chip, no strip icon, no footer clause; nil means
+    /// the audio server could not be asked, which is not the same thing.
+    /// "Open stream" is NOT "playing" — see FeatureSound.swift.
+    @Published private(set) var sound = SoundState()
+
+    /// The memory-pressure notifier's user-visible state: what it told the
+    /// user, whether the user actually saw it, and whether they switched
+    /// it off. NOT a per-tick value — `PressureAlertBridge` publishes it
+    /// only when a notification is posted, when the OS's permission answer
+    /// changes, when the switch is flipped, or (for the one live line)
+    /// while the panel is open. See FeaturePressureAlert.swift.
+    @Published private(set) var pressureAlert = PressureAlertState()
+
+    /// Clipboard history, already formatted. Written ONLY when the
+    /// clipboard actually moves — never on a tick. See
+    /// IslandSectionClipboard.swift.
+    @Published private(set) var clipboard = ClipboardSectionState()
+
     private let iconCache = AppIconCache()
     private var token: MetricsObserverToken?
+    /// Not a `MetricsObserverToken`: the calendar engine has its own
+    /// observer list because it publishes on its own schedule and not on
+    /// the metrics tick. Same contract — dropping the token does not
+    /// unsubscribe, `remove` does.
+    private var calendarToken: CalendarObserverToken?
     private lazy var printerPoller = PrinterPoller(model: self)
     private lazy var privacyWatcher = PrivacyWatcher(model: self)
+    private lazy var soundWatcher = SoundWatcher(model: self)
+    private lazy var tunnelWatcher = TunnelWatcher(model: self)
 
     // MARK: - Lifecycle
 
@@ -212,6 +269,27 @@ final class IslandModel: ObservableObject {
         }
         privacyWatcher.start()
         printerPoller.start()
+        soundWatcher.start()
+        tunnelWatcher.start()
+
+        // The memory-pressure notifier. It subscribes to MetricsEngine
+        // itself, because unlike every other feature here it has to keep
+        // watching while the panel is shut. It prompts for nothing at
+        // launch — see FeaturePressureAlert.swift.
+        PressureAlertBridge.shared.start(model: self)
+
+        // Event-driven, not tick-driven: the engine publishes only on a
+        // real `changeCount` transition, so on an idle machine this never
+        // calls back at all. See IslandSectionClipboard.swift.
+        ClipboardFeature.shared.start(model: self)
+
+        // NEVER PROMPTS. Starts only if the user turned the feature on in
+        // the status-item menu AND macOS has already granted access. On a
+        // fresh machine this is one `UserDefaults.bool` and a return.
+        CalendarEngine.shared.startIfEnabled()
+        calendarToken = CalendarEngine.shared.observe { [weak self] snap in
+            self?.setCalendar(snap)
+        }
     }
 
     func stop() {
@@ -223,6 +301,15 @@ final class IslandModel: ObservableObject {
         MetricsEngine.shared.setDetail(.islandPanel, needed: false)
         privacyWatcher.stop()
         printerPoller.stop()
+        soundWatcher.stop()
+        tunnelWatcher.stop()
+        PressureAlertBridge.shared.stop()
+        ClipboardFeature.shared.stop()
+        // Dropping the token does NOT unsubscribe — same contract as
+        // MetricsObserverToken.
+        if let calendarToken { CalendarEngine.shared.remove(calendarToken) }
+        calendarToken = nil
+        CalendarEngine.shared.stop()
     }
 
     func setGeometry(notchSize: CGSize, hasPhysicalNotch: Bool) {
@@ -236,6 +323,11 @@ final class IslandModel: ObservableObject {
         // Always: the one value the collapsed island draws.
         let nextStrip = IslandStripState(pressure: snap.memory?.pressureLevel)
         if strip != nextStrip { strip = nextStrip }
+
+        // The meeting countdown, which the engine deliberately does not
+        // publish: it is derived from the CLOCK. One Optional read per
+        // tick when there is no meeting, which is the normal state.
+        refreshCalendarStrip()
 
         // Only while the panel is actually on screen. Closed, the expanded
         // hierarchy is not in the view tree, so building its state would be
@@ -296,6 +388,13 @@ final class IslandModel: ObservableObject {
         // The printer poller speeds up while somebody can see the answer
         // and pulls a fresh reading the moment the panel opens.
         printerPoller.setPanelOpen(new == .opened)
+        // Same reason, cheaper subject: a ~2 ms HAL sweep so the Звук tab
+        // is not showing a stale answer at the moment it opens.
+        soundWatcher.setPanelOpen(new == .opened)
+        // So does the tunnel watcher: 10 s shut, 4 s open. Routes change
+        // when a tunnel comes up or goes down and at no other time, so the
+        // shut cadence is a staleness bound, not a sampling rate.
+        tunnelWatcher.setPanelOpen(new == .opened)
         // So does the metrics engine. The panel is the only thing in the app
         // that draws the per-app table, and nothing anywhere draws watts,
         // temperatures, disk capacity or battery — so while it is shut the
@@ -378,6 +477,86 @@ final class IslandModel: ObservableObject {
         if status == .opened { refreshRouter() }
     }
 
+    /// Called by `TunnelWatcher` on the main thread after every sample.
+    func setTunnel(_ metrics: TunnelMetrics?) {
+        precondition(Thread.isMainThread)
+        guard tunnel != metrics else { return }
+        tunnel = metrics
+        updateTrailingSlot()
+        if status == .opened { refreshRouter() }
+    }
+
+    /// Called by `SoundWatcher` on the main thread after every sweep.
+    func setSound(_ state: SoundState) {
+        precondition(Thread.isMainThread)
+        guard sound != state else { return }
+        sound = state
+        updateTrailingSlot()
+        if status == .opened { refreshRouter() }
+    }
+
+    /// Called by `PressureAlertBridge` on the main thread. Same contract
+    /// as `setPrinter`: it compares first, so a tick that would draw the
+    /// same pixels publishes nothing.
+    ///
+    /// No `updateTrailingSlot()`. The notifier's whole point is that it
+    /// speaks through Notification Centre; having also taken the one
+    /// ambient slot in the menu bar would be saying the same thing twice.
+    func setPressureAlert(_ state: PressureAlertState) {
+        precondition(Thread.isMainThread)
+        guard pressureAlert != state else { return }
+        pressureAlert = state
+        if status == .opened { refreshRouter() }
+    }
+
+    /// Called by `ClipboardFeature` on the main thread after every
+    /// clipboard change. Event-driven, not tick-driven: `ClipboardEngine`
+    /// publishes only on a real `changeCount` transition, so on an idle
+    /// machine this is never called at all.
+    ///
+    /// Deliberately does NOT touch the wings. Clipboard history never
+    /// earns a collapsed-strip slot — it has no state worth a pixel in a
+    /// 77 pt wing — so there is no `requestTrailingWing` here and
+    /// `stripSlotSection` is never `.clipboard`.
+    func setClipboard(_ state: ClipboardSectionState) {
+        precondition(Thread.isMainThread)
+        guard clipboard != state else { return }
+        clipboard = state
+        // The rail gains its chip with a copy and loses it again when the
+        // copy goes stale — see `ClipboardSectionState.isLive`.
+        if status == .opened { refreshRouter() }
+    }
+
+    /// Called by `CalendarEngine`'s observer on the main thread. The
+    /// engine only publishes when the MEANING changed — a different
+    /// meeting, a different candidate count, a status change.
+    func setCalendar(_ snapshot: CalendarSnapshot) {
+        precondition(Thread.isMainThread)
+        guard calendar != snapshot else { return }
+        calendar = snapshot
+        // At once, not on the next tick: a meeting that arrives already
+        // inside its window must take the strip slot now.
+        refreshCalendarStrip()
+        if status == .opened { refreshRouter() }
+    }
+
+    /// THE WHOLE COST OF THE CALENDAR FEATURE AT IDLE: one Optional read
+    /// and a compare against nil (measured 66.5 ns). It has to live on the
+    /// tick rather than in the engine because `isImminent` is a function
+    /// of the clock, and the engine's `isMeaningfullyEqual` dedup compares
+    /// the MEETING — when a meeting crosses into its window the engine
+    /// re-queries and then publishes nothing, because the same meeting is
+    /// still the next meeting.
+    private func refreshCalendarStrip() {
+        let text = calendar.isImminent ? CalendarFmt.strip(calendar.next) : nil
+        guard calendarStrip != text else { return }
+        let hadSlot = calendarStrip != nil
+        calendarStrip = text
+        // Only the APPEARANCE or DISAPPEARANCE of the countdown is a
+        // question for the arbiter; a minute ticking over is not.
+        if hadSlot != (text != nil) { updateTrailingSlot() }
+    }
+
     /// Called by `PrivacyWatcher` on the main thread when a sensor starts
     /// or stops.
     ///
@@ -401,17 +580,40 @@ final class IslandModel: ObservableObject {
     /// feature's file — priority is only meaningful relative to everything
     /// else competing for the same 79.5 pt.
     ///
-    /// Priority, by cost-of-missing-it (from the architecture spike):
+    /// Priority, by cost-of-missing-it (from the architecture spike, then
+    /// settled between four features that all wanted the same 77 pt):
     ///   1. transient toast          — not built yet
     ///   2. print progress           — the only feature with an
     ///                                 UNRECOVERABLE deadline: hours of
     ///                                 machine time and a spool of filament
-    ///   3. now playing / meeting / tunnel / shelf — not built yet
+    ///   3. the next meeting         — a RECOVERABLE deadline, but a real
+    ///                                 one, and it expires by itself: the
+    ///                                 countdown is non-nil for exactly the
+    ///                                 15 minutes before a start
+    ///   4. audio output open        — no deadline, but transient: it is
+    ///                                 gone when the sound stops, so it
+    ///                                 cannot squat
+    ///   5. a tunnel off the default route — no deadline AND no end. It is
+    ///                                 last precisely because it is the
+    ///                                 longest-lived of the four: a VPN
+    ///                                 that has been up since breakfast
+    ///                                 must not starve a meeting that
+    ///                                 starts in nine minutes
     ///   0. nothing                  — the wing goes back to 26 pt
     ///
-    /// The privacy rail is NOT in this list. It is pinned at the far right
-    /// of the wing and is drawn beside whatever wins here, never instead
-    /// of it.
+    /// NOT IN THIS LIST, on purpose: the pressure notifier (it speaks
+    /// through Notification Centre, and saying the same thing twice is
+    /// worse than saying it once) and the clipboard (a history has no
+    /// instant worth an ambient pixel).
+    ///
+    /// The privacy rail is NOT in this list either. It is pinned at the far
+    /// right of the wing and is drawn beside whatever wins here, never
+    /// instead of it.
+    ///
+    /// IF YOU REORDER THESE BRANCHES, REORDER `IslandTrailingWing` TO
+    /// MATCH. This method picks which tab the click navigates to; the wing
+    /// picks what is drawn. Drawing one and navigating to the other is the
+    /// bug that ordering comment exists to prevent.
     private func updateTrailingSlot() {
         if printer != nil {
             // Ask for the ceiling and LAY OUT to what comes back. The
@@ -422,6 +624,30 @@ final class IslandModel: ObservableObject {
             // the granted one is the bug this comment exists to prevent.
             requestTrailingWing(IslandMetrics.maxTrailingWingWidth)
             setStripSlotSection(.printer)
+        } else if calendarStrip != nil {
+            // The ceiling as well: MeetingStripSlot borrows the print
+            // slot's exact geometry (14 pt ring + 4 pt gap + 25 pt text),
+            // so `trailingLayout` and `maxTrailingWingWidth` still bound
+            // ONE worst case rather than two.
+            requestTrailingWing(IslandMetrics.maxTrailingWingWidth)
+            setStripSlotSection(.calendar)
+        } else if sound.hasOutput {
+            // Asks for LESS than the ceiling: one 14 pt app icon and no
+            // text, 48 pt against the ring's 77. There is no honest
+            // four-character form of "what is playing".
+            requestTrailingWing(SoundStripSlot.wingWidth)
+            setStripSlotSection(.sound)
+        } else if tunnel?.deservesStripSlot == true {
+            // `== true` and not `!= false` — nil is "could not measure"
+            // and must never light the wing.
+            //
+            // 48 pt, for the same reason as the sound slot: 7 lead-in +
+            // 14 glyph + 4 gap + 23 rail is everything TunnelStripSlot can
+            // spend, and asking for the ceiling would reserve 25 pt of
+            // menu bar that nothing would draw in.
+            requestTrailingWing(IslandMetrics.slotLeadingGap + IslandMetrics.ringDiameter
+                                + IslandMetrics.slotGap + IslandMetrics.privacyRailWidth)
+            setStripSlotSection(.tunnel)
         } else {
             requestTrailingWing(IslandMetrics.restingWingWidth)
             setStripSlotSection(.memory)

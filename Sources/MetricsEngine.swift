@@ -338,6 +338,21 @@ public final class MetricsEngine {
         var refreshed = Set<MetricKind>()
         let detailed = self.detailed
 
+        // Clipboard history. MEASURED 1.32 us when the clipboard has not
+        // moved, which is >99% of ticks — the cheap check IS `changeCount`,
+        // one integer read, and 1.32 us at 1 Hz is 0.00013% of one core.
+        // The 63.5 us capture path runs on a user copy, not on a tick, so
+        // this needs no cadence multiplier and no `detailed` gate: it is
+        // cheaper than a single SMC key read (0.28 ms). Nothing here can
+        // block on a lock the main thread holds. See ClipboardEngine.swift.
+        //
+        // It stays at the TOP of the tick and OUTSIDE `due(...)`: a
+        // clipboard history that only records while the panel is open is
+        // not a history. This is the ONLY line the second wave of features
+        // added to this tick — the other four are driven by their own
+        // watchers and MetricsEngine never learns they exist.
+        ClipboardEngine.shared.poll()
+
         // --- EVERY tick, unconditionally ---
         //
         // Memory and CPU are the closed-state readout (the status item's two

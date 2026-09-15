@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     private var islandItem: NSMenuItem!
     private var cleanupItem: NSMenuItem!
     private var loginItem: NSMenuItem!
+    private var calendarItem: NSMenuItem!
 
     private var metricsToken: MetricsObserverToken?
     private var isCleaning = false
@@ -114,6 +115,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         loginItem.state = LaunchAtLogin.isEnabled ? .on : .off
         menu.addItem(loginItem)
 
+        // THE ONLY THING IN MACPULSE THAT CAN SHOW A PERMISSION DIALOG,
+        // and it only can because the user clicked this line.
+        calendarItem = NSMenuItem(title: "Показывать следующую встречу",
+                                  action: #selector(toggleCalendar), keyEquivalent: "")
+        calendarItem.target = self
+        calendarItem.state = CalendarEngine.shared.isEnabledByUser ? .on : .off
+        calendarItem.toolTip = "Читает только время начала ближайшей встречи. "
+                             + "Названия встреч никуда не записываются и не отправляются."
+        menu.addItem(calendarItem)
+
         menu.addItem(.separator())
         let quitItem = NSMenuItem(title: "Выход", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
@@ -209,6 +220,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         // Fresh numbers the instant the user looks; arrives via the normal
         // observer path.
         MetricsEngine.shared.refreshNow()
+
+        // FREE RECOVERY, AND THE ONLY ONE THERE IS. EventKit posts nothing
+        // when the user flips the switch in System Settings, and the engine
+        // stops sampling once it is in a dead end. One authorizationStatus
+        // call, measured 232 us, and only while the menu is coming down.
+        CalendarEngine.shared.revalidate()
+        CalendarEngine.shared.refreshNow()
+        calendarItem.state = CalendarEngine.shared.isEnabledByUser ? .on : .off
+        if let hint = CalendarFmt.unavailableHint(CalendarEngine.shared.snapshot.status) {
+            calendarItem.toolTip = hint
+        }
+
         islandItem.title = island.isVisible ? "Скрыть островок" : "Показать островок"
     }
 
@@ -257,6 +280,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         let newValue = sender.state != .on
         LaunchAtLogin.isEnabled = newValue
         sender.state = newValue ? .on : .off
+    }
+
+    @objc private func toggleCalendar(_ sender: NSMenuItem) {
+        // `.denied` is the one state where the checkmark cannot mean what
+        // it says: macOS will not re-prompt. Open the pane where the
+        // refusal can be undone instead.
+        //
+        // DELIBERATELY NOT a greyed-out item in validateMenuItem: that
+        // leaves a denied user with no way back at all.
+        if case .unavailable(.denied) = CalendarEngine.shared.snapshot.status {
+            _ = CalendarEngine.openPrivacySettings()
+            return
+        }
+        let enabled = !CalendarEngine.shared.isEnabledByUser
+        CalendarEngine.shared.setEnabled(enabled)
+        sender.state = enabled ? .on : .off
     }
 
     @objc private func quit() {
