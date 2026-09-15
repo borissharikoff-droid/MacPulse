@@ -30,6 +30,24 @@ final class PowerSampler {
     private var previousSample: CFDictionary?
     private var previousAt: UInt64 = 0
 
+    /// What a channel turned out to be, worked out ONCE.
+    private enum Kind { case cpu, gpu, gpuSRAM, ane, dram }
+
+    /// name -> (what it is, how many joules one count is).
+    ///
+    /// WHY THIS CACHE EXISTS. Classifying a channel means reading its unit
+    /// label and running four substring searches over its name, and the
+    /// answer cannot change: the channel set is fixed for the life of the
+    /// subscription, the name is baked into the driver, and the unit is a
+    /// property of the counter. Doing it on every tick cost 0.13% of one
+    /// core all by itself — measured with `sample` on the live app, which
+    /// put `StringProtocol.contains` (27 samples in 30 s), a
+    /// `CFStringCreateWithFormat` inside `IOReportChannelGetUnitLabel` (9)
+    /// and `IOReportChannelGetChannelName` (5) among the hottest frames in
+    /// the process. A channel we could not classify is cached as such too,
+    /// so an unrecognised name is not re-searched every second either.
+    private var kindByName: [String: (kind: Kind?, joulesPerCount: Double)] = [:]
+
     /// nil when libIOReport is unavailable or the subscription is refused.
     init?() {
         guard let lib = IOReportLib.shared else { return nil }
@@ -113,34 +131,32 @@ final class PowerSampler {
 
         for item in items {
             let channel = item as CFDictionary
-            guard cfString(lib.channelGetGroup(channel)) == "Energy Model" else { continue }
             let name = cfString(lib.channelGetChannelName(channel))
-            let unit = cfString(lib.channelGetUnitLabel(channel)).trimmingCharacters(in: .whitespaces)
 
-            // Per-channel divisor. Unknown unit -> skip the channel entirely
-            // rather than invent a number.
-            let joulesPerCount: Double
-            switch unit {
-            case "mJ": joulesPerCount = 1e-3
-            case "uJ", "µJ": joulesPerCount = 1e-6
-            case "nJ": joulesPerCount = 1e-9
-            case "J": joulesPerCount = 1
-            default: continue
+            // One dictionary lookup instead of a unit-label format plus four
+            // substring searches, on every channel, every tick. See
+            // `kindByName`. The classification is derived from the channel's
+            // own immutable name/unit/group, so caching it changes no number.
+            let entry: (kind: Kind?, joulesPerCount: Double)
+            if let cached = kindByName[name] {
+                entry = cached
+            } else {
+                entry = Self.classify(name: name,
+                                      group: cfString(lib.channelGetGroup(channel)),
+                                      unit: cfString(lib.channelGetUnitLabel(channel)))
+                kindByName[name] = entry
             }
-            let watts = Double(lib.simpleGetIntegerValue(channel, 0)) * joulesPerCount / dt
+            guard let kind = entry.kind else { continue }
+
+            let watts = Double(lib.simpleGetIntegerValue(channel, 0)) * entry.joulesPerCount / dt
             guard watts.isFinite, watts >= 0 else { continue }
 
-            // Order matters: check the most specific names first.
-            if name.contains("GPU SRAM") {
-                gpuSRAM = (gpuSRAM ?? 0) + watts
-            } else if name.hasSuffix("CPU Energy") {          // "CPU Energy", "DIE_0_CPU Energy"
-                cpu = (cpu ?? 0) + watts
-            } else if name.hasSuffix("GPU Energy") {          // "GPU Energy", "DIE_0_GPU Energy"
-                gpu = (gpu ?? 0) + watts
-            } else if name.contains("ANE") {                  // "ANE", "ANE0", "ANE0_1"
-                ane = (ane ?? 0) + watts
-            } else if name.contains("DRAM") {
-                dram = (dram ?? 0) + watts
+            switch kind {
+            case .gpuSRAM: gpuSRAM = (gpuSRAM ?? 0) + watts
+            case .cpu:     cpu = (cpu ?? 0) + watts
+            case .gpu:     gpu = (gpu ?? 0) + watts
+            case .ane:     ane = (ane ?? 0) + watts
+            case .dram:    dram = (dram ?? 0) + watts
             }
         }
 
@@ -190,6 +206,36 @@ final class PowerSampler {
             out.append((name, unit, watts))
         }
         return out.sorted { ($0.2 ?? -1) > ($1.2 ?? -1) }
+    }
+
+    /// The whole of the old per-tick body, moved somewhere it runs once per
+    /// channel per process. Pure, so it cannot drift from what it replaced.
+    ///
+    /// Unit labels are NOT uniform across channels — see the header: on this
+    /// M2 "GPU Energy" is nJ while CPU/ANE/DRAM are mJ, and assuming mJ for
+    /// all of them turns 0.271 W into 271,087 W. An unrecognised unit, or a
+    /// channel outside the Energy Model group, yields kind == nil and the
+    /// channel is skipped entirely — never guessed at.
+    private static func classify(name: String, group: String, unit rawUnit: String)
+        -> (kind: Kind?, joulesPerCount: Double) {
+        guard group == "Energy Model" else { return (nil, 0) }
+        let joulesPerCount: Double
+        switch rawUnit.trimmingCharacters(in: .whitespaces) {
+        case "mJ": joulesPerCount = 1e-3
+        case "uJ", "µJ": joulesPerCount = 1e-6
+        case "nJ": joulesPerCount = 1e-9
+        case "J": joulesPerCount = 1
+        default: return (nil, 0)
+        }
+        // Order matters: check the most specific names first.
+        let kind: Kind?
+        if name.contains("GPU SRAM") { kind = .gpuSRAM }
+        else if name.hasSuffix("CPU Energy") { kind = .cpu }   // "CPU Energy", "DIE_0_CPU Energy"
+        else if name.hasSuffix("GPU Energy") { kind = .gpu }   // "GPU Energy", "DIE_0_GPU Energy"
+        else if name.contains("ANE") { kind = .ane }           // "ANE", "ANE0", "ANE0_1"
+        else if name.contains("DRAM") { kind = .dram }
+        else { kind = nil }
+        return (kind, joulesPerCount)
     }
 
     private func cfString(_ value: Unmanaged<CFString>?) -> String {

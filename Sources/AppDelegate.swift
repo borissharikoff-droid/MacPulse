@@ -193,6 +193,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
     func menuWillOpen(_ menu: NSMenu) {
         isMenuOpen = true
+        // The header names the top app by footprint, which is the only
+        // thing in this process that reads the per-app table while the
+        // island's panel is shut. Say so, so the engine samples the
+        // expensive metrics at full rate for as long as the menu is up and
+        // not one tick longer. See MetricsEngine.Cadence.
+        MetricsEngine.shared.setDetail(.statusMenu, needed: true)
         // The header is not built while the menu is shut, so seed it from
         // the snapshot we already have before asking for a fresh one — the
         // fresh one arrives asynchronously and the menu is already on
@@ -208,6 +214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
     func menuDidClose(_ menu: NSMenu) {
         isMenuOpen = false
+        MetricsEngine.shared.setDetail(.statusMenu, needed: false)
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {

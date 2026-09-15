@@ -39,15 +39,87 @@ public final class MetricsEngine {
     /// minute of sparkline.
     public var historyLimit = 60
 
+    /// Something that can actually display the expensive metrics. While
+    /// this set is empty NOTHING ON SCREEN reads them — see `Cadence`.
+    public enum DetailConsumer: Hashable, Sendable {
+        /// The island's expanded panel (per-app rows, coverage line).
+        case islandPanel
+        /// The status item's menu (its header names the top app).
+        case statusMenu
+        /// `--probe`, which prints every metric and must see all of them.
+        case probe
+    }
+
+    // =====================================================================
+    // CADENCE — and read this before changing any of it, because the BASE
+    // TICK IS NOT NEGOTIABLE and none of these numbers touch it.
+    //
+    // `interval` stays 1.0 s. Memory, CPU and network are sampled on EVERY
+    // tick, always, whatever else is going on: memory and CPU are what the
+    // status item's two bars and the island's pressure dot draw, and the
+    // network counters the kernel exposes are 32-BIT, so skipping a tick
+    // risks a wrap that would be read as a 4 GB burst.
+    //
+    // The rest is sampled at a multiple of the base tick, and the multiple
+    // depends on whether anything can display the answer. Nothing in this
+    // app draws power, temperature, disk, battery or the per-app table
+    // while the panel and the menu are both shut — grep the UI: the
+    // collapsed island reads `strip.pressure` and the status item reads
+    // cpu.overall.busy / memory.usedFraction, and that is the entire
+    // closed-state readout. Sampling IOReport and walking 397 PIDs once a
+    // second to fill a struct that nothing reads is the definition of work
+    // that is not worth its watts.
+    //
+    // MEASURED HERE (30 s `sample` on the live app, 1.28 ms per sample,
+    // shares of one core):
+    //     ProcessSampler.sample     397-PID proc_pid_rusage walk   0.60%
+    //     PowerSampler.sample       IOReport + per-channel strings 0.52%
+    //     SMCSampler.temperatures   ~42 ioctls, every 5th tick     0.23%
+    //     DiskSampler.refreshCapacity  one call, every 30th tick   0.14%
+    //     everything else on the queue                             0.13%
+    // i.e. the queue was 1.62% of a core on its own, and 1.26% of that was
+    // being spent on values that were not on screen.
+    //
+    // THE LAST MEASURED VALUE IS CARRIED FORWARD on a skipped tick, exactly
+    // as the SMC temperatures and the battery already were. That is a real
+    // measurement a few seconds old, not a fabricated one — and
+    // `MetricsSnapshot.refreshed` still names only the metrics that were
+    // genuinely re-read this tick, so nothing downstream can mistake a
+    // carried value for a fresh one.
+    // =====================================================================
     private enum Cadence {
         /// SMC is one ioctl per sensor key (~0.28 ms each, ~42 keys here), so
         /// an SMC tick costs ~12 ms against ~3 ms for a normal one. Silicon
         /// temperature does not move meaningfully in 5 s, so pay it at 1/5 the
         /// rate: amortized that is under 5 ms per tick, on a utility queue.
         static let smcTicks = 5
+        /// ...and it moves no faster when nobody is reading it.
+        static let smcIdleTicks = 15
+
         static let batteryTicks = 5
-        /// Free space barely moves and the query is the most expensive one here.
+        /// A battery percentage that changed inside 30 s is a battery on
+        /// fire. Nothing displays it while the panel is shut in any case.
+        static let batteryIdleTicks = 30
+
+        /// Free space barely moves and the query is the most expensive one
+        /// here — measured at ~42 ms, because `volumeAvailableCapacityFor…`
+        /// goes all the way into CacheDelete and walks the APFS volume
+        /// roles. Every 30 s while somebody is looking; every 10 minutes
+        /// otherwise.
         static let diskCapacityTicks = 30
+        static let diskCapacityIdleTicks = 600
+
+        /// The per-app table: one `proc_pid_rusage` syscall for every PID on
+        /// the machine. Only the open panel and the menu header show it.
+        static let processTicks = 1
+        static let processIdleTicks = 5
+
+        /// IOReport "Energy Model". Nothing draws watts while the panel is
+        /// shut; sampled at 1/5 the rate the delta simply covers 5 s, which
+        /// is a true average over that window rather than an estimate.
+        static let powerTicks = 1
+        static let powerIdleTicks = 5
+
         /// SAFETY NET ONLY for the pid -> app-name map. That map is rebuilt
         /// when NSWorkspace says an app launched or quit, which is the only
         /// way it can change; this is the floor in case a notification is
@@ -88,6 +160,8 @@ public final class MetricsEngine {
     /// handed over again.
     private var lastAppIdentities: [pid_t: AppIdentity] = [:]
     private var appIdentityRefreshScheduled = false
+    /// Who is currently able to SEE the expensive metrics. Main thread.
+    private var detailConsumers: Set<DetailConsumer> = []
 
     // MARK: - Sampling-queue state (NEVER touch from main)
 
@@ -106,9 +180,22 @@ public final class MetricsEngine {
 
     private var tickCount = 0
     private var lastSnapshotAt: UInt64?
+    /// Queue-side mirror of `detailConsumers`. Never read from main.
+    private var detailed = false
+    /// Ticks since each slow sampler last actually ran. Counters rather than
+    /// `tickCount % n`, because `n` changes when the panel opens and a
+    /// modulo would then skip or double-fire at the boundary. Seeded high
+    /// so every one of them runs on the first tick.
+    private var ticksSinceProcesses = Int.max / 2
+    private var ticksSincePower = Int.max / 2
+    private var ticksSinceSMC = Int.max / 2
+    private var ticksSinceBattery = Int.max / 2
+    private var ticksSinceDiskCapacity = Int.max / 2
     /// Carried forward between ticks for the slow-cadence samplers.
     private var lastThermal: ThermalMetrics?
     private var lastBattery: BatteryMetrics?
+    private var lastProcesses: ProcessMetrics?
+    private var lastIOReportPower: PowerMetrics?
     private var lastSMCTemps: (perf: Double?, eff: Double?, gpu: Double?, battery: Double?, peak: Double?)?
     private var lastSMCPower: (system: Double?, adapter: Double?, battery: Double?)?
     /// Mirrored from ProcessInfo's notification so the sample path never has
@@ -202,23 +289,69 @@ public final class MetricsEngine {
         queue.async { [weak self] in self?.tick() }
     }
 
+    /// Say whether something that can DISPLAY the expensive metrics is on
+    /// screen. Balanced calls: whoever passes `true` must pass `false`.
+    ///
+    /// This does not change the base tick — memory, CPU and network are
+    /// sampled every second either way. It changes how often the metrics
+    /// that nothing can currently show are re-read. See `Cadence`.
+    ///
+    /// Turning detail ON does not force an immediate tick, on purpose: an
+    /// extra tick milliseconds after the last one gives every delta-based
+    /// metric a near-zero dt and prints a garbage first number at exactly
+    /// the moment the user looks. Instead the slow samplers are marked due,
+    /// so the next ordinary tick — at most one second away — refreshes all
+    /// of them. Until it lands the panel shows the carried-forward values,
+    /// which are real measurements a few seconds old, never blanks.
+    public func setDetail(_ consumer: DetailConsumer, needed: Bool) {
+        precondition(Thread.isMainThread)
+        let wasNeeded = !detailConsumers.isEmpty
+        if needed { detailConsumers.insert(consumer) } else { detailConsumers.remove(consumer) }
+        let isNeeded = !detailConsumers.isEmpty
+        guard wasNeeded != isNeeded else { return }
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.detailed = isNeeded
+            guard isNeeded else { return }
+            self.ticksSinceProcesses = Int.max / 2
+            self.ticksSincePower = Int.max / 2
+            self.ticksSinceSMC = Int.max / 2
+            self.ticksSinceBattery = Int.max / 2
+            self.ticksSinceDiskCapacity = Int.max / 2
+        }
+    }
+
     // MARK: - The tick (SAMPLING QUEUE)
+
+    /// True on the tick a slow sampler is due, and resets its counter.
+    private func due(_ ticksSince: inout Int, every n: Int) -> Bool {
+        ticksSince += 1
+        guard ticksSince >= max(1, n) else { return false }
+        ticksSince = 0
+        return true
+    }
 
     private func tick() {
         dispatchPrecondition(condition: .onQueue(queue))
         let started = Mono.now()
         tickCount += 1
         var refreshed = Set<MetricKind>()
+        let detailed = self.detailed
 
-        // --- every tick ---
+        // --- EVERY tick, unconditionally ---
+        //
+        // Memory and CPU are the closed-state readout (the status item's two
+        // bars, the island's pressure dot). Network is here because the
+        // kernel's per-interface byte counters are 32-BIT: this sampler
+        // reconstructs the delta modulo 2^32, which is only sound while the
+        // sampling interval is short enough that no interface can move 4 GB
+        // between two reads. Slowing it down would turn a fast transfer into
+        // a wrapped, silently wrong rate. It costs 0.055% of a core.
         let memory = memorySampler.sample()
         if memory != nil { refreshed.insert(.memory) }
 
         let cpu = cpuSampler.sample()
         if cpu != nil { refreshed.insert(.cpu) }
-
-        let processes = processSampler.sample()
-        if processes != nil { refreshed.insert(.processes) }
 
         let network = networkSampler.sample()
         if network != nil { refreshed.insert(.network) }
@@ -227,7 +360,22 @@ public final class MetricsEngine {
         if gpu != nil { refreshed.insert(.gpu) }
 
         // --- slow cadences: resample, else carry the previous value forward ---
-        if tickCount % Cadence.smcTicks == 1 || lastSMCTemps == nil {
+        //
+        // The per-app table is one syscall PER PID — 397 of them on this
+        // machine, 0.60% of a core at 1 Hz — and only the open panel and the
+        // menu header ever show it.
+        if due(&ticksSinceProcesses,
+               every: detailed ? Cadence.processTicks : Cadence.processIdleTicks)
+            || lastProcesses == nil {
+            if let fresh = processSampler.sample() {
+                lastProcesses = fresh
+                refreshed.insert(.processes)
+            }
+        }
+        let processes = lastProcesses
+
+        if due(&ticksSinceSMC, every: detailed ? Cadence.smcTicks : Cadence.smcIdleTicks)
+            || lastSMCTemps == nil {
             if let smc = smcSampler {
                 lastSMCTemps = smc.temperatures()
                 lastSMCPower = (smc.systemWatts(), smc.adapterWatts(), smc.batteryWatts())
@@ -235,20 +383,33 @@ public final class MetricsEngine {
             }
         }
 
-        if tickCount % Cadence.batteryTicks == 1 || lastBattery == nil {
+        if due(&ticksSinceBattery, every: detailed ? Cadence.batteryTicks : Cadence.batteryIdleTicks)
+            || lastBattery == nil {
             lastBattery = BatterySampler.sample()
             if lastBattery != nil { refreshed.insert(.battery) }
         }
 
-        if tickCount % Cadence.diskCapacityTicks == 1 {
+        if due(&ticksSinceDiskCapacity,
+               every: detailed ? Cadence.diskCapacityTicks : Cadence.diskCapacityIdleTicks) {
             diskSampler.refreshCapacity()
         }
         let disk = diskSampler.sample()
         if disk != nil { refreshed.insert(.disk) }
 
-        // --- power: IOReport every tick, SMC totals merged from the cache ---
-        var power = powerSampler?.sample()
-        if power != nil { refreshed.insert(.power) }
+        // --- power: IOReport on its own cadence, SMC totals from the cache ---
+        //
+        // Skipping a tick does NOT skip any energy: IOReport counters are
+        // cumulative and the sampler divides by its own measured dt, so a
+        // reading taken every fifth tick is the true average over those five
+        // seconds rather than a sample of one of them.
+        if due(&ticksSincePower, every: detailed ? Cadence.powerTicks : Cadence.powerIdleTicks)
+            || lastIOReportPower == nil {
+            if let fresh = powerSampler?.sample() {
+                lastIOReportPower = fresh
+                refreshed.insert(.power)
+            }
+        }
+        var power = lastIOReportPower
         let smcPower = lastSMCPower
         if let existing = power {
             power = existing.mergingSMC(system: smcPower?.system,

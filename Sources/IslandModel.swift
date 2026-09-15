@@ -130,8 +130,10 @@ final class IslandModel: ObservableObject {
     //
     // ASYMMETRIC ON PURPOSE. The left wing has 0.5 pt of measured
     // clearance against the frontmost app's menus and is frozen forever;
-    // the right wing has 172.5 pt and is the only expandable surface the
-    // collapsed island has. See IslandMetrics for the measurements.
+    // the right wing is the only expandable surface the collapsed island
+    // has. How far it may expand is bounded by our own status item and by
+    // the leftmost position that item has held — never by a measurement of
+    // somebody else's menu bar extra. See IslandMetrics for why.
 
     /// Frozen. Not a var by accident — see IslandMetrics.leadingWingWidth.
     @Published private(set) var leadingWingWidth: CGFloat = IslandMetrics.leadingWingWidth
@@ -140,7 +142,14 @@ final class IslandModel: ObservableObject {
     /// Runtime ceiling, from MacPulse's own status item position. Not
     /// published: a change to it only ever moves `trailingWingWidth`, and
     /// that IS published.
-    private(set) var trailingWingLimit: CGFloat = IslandMetrics.maxTrailingWingWidth
+    ///
+    /// STARTS AT THE RESTING WIDTH, i.e. "no growth until somebody has
+    /// measured where our own icon is". The controller supplies the real
+    /// bound one main-queue turn after launch. Starting at the ceiling
+    /// instead would mean the island could draw its widest plate during
+    /// exactly the window in which nothing had checked whether there was
+    /// room for it.
+    private(set) var trailingWingLimit: CGFloat = IslandMetrics.restingWingWidth
 
     /// Fires AFTER a wing width has actually changed.
     ///
@@ -208,6 +217,10 @@ final class IslandModel: ObservableObject {
     func stop() {
         if let token { MetricsEngine.shared.remove(token) }
         token = nil
+        // Balanced with setStatus(.opened): a panel that is torn down while
+        // open must not leave the engine sampling at full rate for a view
+        // that no longer exists.
+        MetricsEngine.shared.setDetail(.islandPanel, needed: false)
         privacyWatcher.stop()
         printerPoller.stop()
     }
@@ -283,6 +296,13 @@ final class IslandModel: ObservableObject {
         // The printer poller speeds up while somebody can see the answer
         // and pulls a fresh reading the moment the panel opens.
         printerPoller.setPanelOpen(new == .opened)
+        // So does the metrics engine. The panel is the only thing in the app
+        // that draws the per-app table, and nothing anywhere draws watts,
+        // temperatures, disk capacity or battery — so while it is shut the
+        // engine samples those on a long cadence. Same 1 Hz base tick either
+        // way; see MetricsEngine.Cadence. `.popping` does not count: the
+        // panel is not in the view tree until `.opened`.
+        MetricsEngine.shared.setDetail(.islandPanel, needed: new == .opened)
         if new == .opened && !wasOpen {
             // Refresh BEFORE selecting. `visibleSections` is whatever it
             // was when the panel last closed, and the strip slot's section
@@ -395,11 +415,11 @@ final class IslandModel: ObservableObject {
     private func updateTrailingSlot() {
         if printer != nil {
             // Ask for the ceiling and LAY OUT to what comes back. The
-            // runtime bound on this machine grants 79.5 pt, not 156 —
-            // MacPulse's own status item is at x=952, well left of the
-            // first foreign menu bar extra. Designing the slot for the
-            // requested width instead of the granted one is the bug this
-            // comment exists to prevent.
+            // ceiling is 77 pt — exactly what the widest row can use — and
+            // the runtime bound can only cut it further (this machine's own
+            // status item at x=952 leaves 79.5 pt, so 77 is what binds
+            // here). Designing the slot for the requested width instead of
+            // the granted one is the bug this comment exists to prevent.
             requestTrailingWing(IslandMetrics.maxTrailingWingWidth)
             setStripSlotSection(.printer)
         } else {

@@ -18,6 +18,12 @@ enum Probe {
         let skipLoad = arguments.contains("--no-load")
         let engine = MetricsEngine.shared
         engine.historyLimit = 200
+        // The probe prints EVERY metric, so it is a detail consumer exactly
+        // like the island's panel and the status menu. Without this it would
+        // report the slow-cadence values (power, temperatures, the per-app
+        // table) as carried-forward numbers, and the per-tick cost summary
+        // would measure the idle cadence rather than the full one.
+        engine.setDetail(.probe, needed: true)
         engine.start()
 
         line()
