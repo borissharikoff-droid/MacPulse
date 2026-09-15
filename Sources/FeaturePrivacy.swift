@@ -297,8 +297,13 @@ final class PrivacyWatcher {
         scanPending = true
         queue.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             guard let self else { return }
-            self.scanPending = false
+            // Cleared only AFTER the prompt scan, so a burst that arrives
+            // inside the coalescing window collapses to one pair of scans
+            // rather than one pair EACH. A scan is ~70 synchronous property
+            // reads against coreaudiod; N of them for one event is the
+            // pathology this flag exists to prevent.
             self.scan()
+            self.scanPending = false
         }
         queue.asyncAfter(deadline: .now() + 0.45) { [weak self] in
             self?.scan()

@@ -65,17 +65,19 @@ struct IslandLeadingWing: View {
     }
 }
 
-/// RIGHT of the camera housing. Empty at rest.
+/// RIGHT of the camera housing: the privacy rail, and one live slot.
 ///
-/// WHEN YOU FILL THIS: the width is not yours to choose from in here.
-/// Call `model.requestTrailingWing(w)` — it clamps against the status
-/// item — and lay out to `model.trailingWingWidth`, which is what the
-/// controller's hit rect is derived from. Drawing wider than the
-/// published width puts pixels outside the hit rect, where clicks go to
-/// the menu bar instead of to you.
+/// Empty at rest, which is most of the time — no sensor in use and no
+/// print means both are absent and the wing is back at 26 pt.
 ///
-/// Also call `model.setStripSlotSection(...)` so that clicking the strip
-/// opens the panel on the matching tab.
+/// WHEN YOU ADD A FEATURE TO THE SLOT: the width is not yours to choose
+/// from in here. The arbiter in `IslandModel.updateTrailingSlot` decides
+/// who wins, calls `model.requestTrailingWing(w)` — which clamps against
+/// our own status item — and calls `model.setStripSlotSection(...)` so
+/// that clicking the strip opens the panel on the matching tab. Lay out
+/// to what `IslandMetrics.trailingLayout` gives you and never to what was
+/// requested: drawing wider than the published wing puts pixels outside
+/// the hit rect, where clicks go to the menu bar instead of to you.
 struct IslandTrailingWing: View {
     @ObservedObject var model: IslandModel
     /// What the wing is ACTUALLY this wide right now. Collapsed that is

@@ -30,7 +30,7 @@ enum PrinterProbe {
         // because this P1S is powered off most of the time, so the only
         // way to see the printing path is to feed it a payload produced by
         // the panel's own printer.parse_status(). It is an honest split:
-        // the LINK is proven live by the default mode above, the PARSER is
+        // the LINK is proven live by the default mode below, the PARSER is
         // proven here, and neither claims to have proven the other.
         if let i = arguments.firstIndex(of: "--printer-parse"), i + 1 < arguments.count {
             let path = arguments[i + 1]

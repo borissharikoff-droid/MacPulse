@@ -29,16 +29,23 @@ import Foundation
 // CADENCE. A 3D print is measured in hours, so this polls slowly and only
 // when somebody could see the answer:
 //
-//   every  8 s   while a print is live (the strip ring is on screen) or
+//   every   8 s  while a print is live (the strip ring is on screen) or
 //                while the panel is open
-//   every 120 s  otherwise — the discovery poll, the minimum needed for
-//                the strip to ever notice a print STARTING. Without it
-//                the ring could not appear until the user opened the
-//                panel, which defeats the one feature with an
-//                unrecoverable deadline.
+//   every 300 s  otherwise — the discovery poll, so the ring can appear
+//                on its own when a print STARTS. Without it the strip
+//                could not notice until the user opened the panel, which
+//                defeats the one feature with an unrecoverable deadline.
+//                Five minutes rather than one because of what a discovery
+//                poll costs SOMEBODY ELSE: measured, /api/printer takes
+//                3.0 s per call with the printer powered down, because
+//                the panel runs its own 3 s TCP probe of the printer
+//                before giving up. Polling every minute would mean a SYN
+//                on the LAN every minute for a machine that is switched
+//                off. A print runs for hours, five minutes to grow a ring
+//                is nothing, and opening the island answers immediately.
 //   every 600 s  after 3 consecutive failures, because the panel being
-//                down is the normal state of this machine (the printer is
-//                powered off most of the time) and must cost nothing.
+//                down is a normal state too (its LaunchAgent may simply
+//                be stopped) and must cost nothing at all.
 //
 // The fetch itself is BLOCKING for up to ~11 s — the panel does a 3 s TCP
 // probe plus an 8 s MQTT wait on its own request thread — so it runs on a
@@ -237,8 +244,10 @@ final class PrinterPoller {
     /// While a print is on screen — strip ring live, or the panel open.
     private let activeInterval: TimeInterval = 8
     /// Discovery, so the strip can notice a print that STARTS while the
-    /// panel is shut. One loopback socket every two minutes.
-    private let idleInterval: TimeInterval = 120
+    /// panel is shut. One loopback socket every five minutes — and see the
+    /// header for why five and not one: the call costs the user's own
+    /// panel a 3 s TCP probe of a printer that is usually switched off.
+    private let idleInterval: TimeInterval = 300
     /// The panel is down, or the printer has been off for a while. This
     /// machine spends most of its life here.
     private let backoffInterval: TimeInterval = 600
