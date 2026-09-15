@@ -210,7 +210,7 @@ enum Probe {
         if let b = s.battery {
             print("  BATT  charge=\(Fmt.pct(b.charge, 0)) charging=\(b.isCharging.map(String.init) ?? "—") "
                 + "ac=\(b.isOnAC.map(String.init) ?? "—") cycles=\(b.cycleCount.map(String.init) ?? "—") "
-                + "health=\(Fmt.pct(b.health, 1)) toEmpty=\(Fmt.duration(b.timeToEmpty)) "
+                + "ёмкость(сырая)=\(Fmt.pct(b.health, 1)) toEmpty=\(Fmt.duration(b.timeToEmpty)) "
                 + "toFull=\(Fmt.duration(b.timeToFull)) \(Fmt.celsius(b.temperatureCelsius))")
         } else {
             print("  BATT  UNAVAILABLE")
@@ -477,7 +477,7 @@ enum Probe {
         print("    pmset  : \(shell("/usr/bin/pmset", ["-g", "batt"]).split(separator: "\n").joined(separator: " | "))")
         if let b = s.battery {
             print("    ours   : \(Fmt.pct(b.charge, 0)) charging=\(b.isCharging.map(String.init) ?? "—") "
-                + "ac=\(b.isOnAC.map(String.init) ?? "—") cycles=\(b.cycleCount.map(String.init) ?? "—") health=\(Fmt.pct(b.health, 1))")
+                + "ac=\(b.isOnAC.map(String.init) ?? "—") cycles=\(b.cycleCount.map(String.init) ?? "—") ёмкость(сырая)=\(Fmt.pct(b.health, 1))")
         }
         print("    ioreg  : \(shell("/usr/sbin/ioreg", ["-rn", "AppleSmartBattery", "-w0"]).split(separator: "\n").filter { $0.contains("\"CycleCount\"") || $0.contains("\"DesignCapacity\"") || $0.contains("\"AppleRawMaxCapacity\"") }.map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: "  "))")
 

@@ -40,8 +40,6 @@ final class IslandModel: ObservableObject {
     // ---- live data ----
     @Published private(set) var snapshot: MetricsSnapshot?
     /// Decompression bytes/s, downsampled to 2-second buckets, oldest
-    /// first. This is the sparkline — the app's entire reason to exist.
-    @Published private(set) var spark: [Double] = []
 
     // ---- interaction state ----
     @Published private(set) var status: IslandStatus = .closed
@@ -80,19 +78,6 @@ final class IslandModel: ObservableObject {
     private func ingest(_ snap: MetricsSnapshot) {
         snapshot = snap
 
-        // 1 Hz history -> 2 s buckets. Averaging the pair rather than
-        // dropping every other sample keeps a one-tick spike visible
-        // instead of letting it fall between the cracks.
-        let raw = MetricsEngine.shared.series { $0.memory?.rates?.decompressionBytesPerSec }
-        var bucketed: [Double] = []
-        bucketed.reserveCapacity(raw.count / 2 + 1)
-        var i = raw.count % 2 == 0 ? 0 : 1   // keep the newest sample aligned to a bucket edge
-        if i == 1, let first = raw.first { bucketed.append(first) }
-        while i + 1 < raw.count {
-            bucketed.append((raw[i] + raw[i + 1]) / 2)
-            i += 2
-        }
-        if bucketed != spark { spark = bucketed }
 
         // Retire finished quit rows once the app is really gone.
         pruneQuitPhases()

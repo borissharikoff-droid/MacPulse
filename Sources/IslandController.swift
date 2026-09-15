@@ -83,7 +83,12 @@ final class IslandController {
         guard let panel else { return }
         if visible {
             panel.orderFrontRegardless()
-            startMonitors()
+            // restartMonitors, not startMonitors: hiding never restores
+            // ignoresMouseEvents, so if the pointer happened to be over the
+            // island when it was hidden, the panel comes back still disarmed
+            // and swallows clicks in the notch strip until the next mouse
+            // move. Re-seeding from the pointer's real position closes that.
+            restartMonitors()
         } else {
             collapse(animated: false)
             panel.orderOut(nil)

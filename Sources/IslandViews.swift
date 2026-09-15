@@ -135,101 +135,7 @@ enum UIFmt {
     }
 }
 
-// MARK: - Sparkline
-
-/// Compressor decompression rate over the last ~60 s at 2 s resolution.
-/// This is the differentiator: sustained decompression is exactly when the
-/// machine "feels slow", it never touches the disk, and no shipping
-/// monitor displays it.
-struct Sparkline: View {
-    let values: [Double]
-    let tint: Color
-    var lineWidth: CGFloat = 1.4
-
-    /// Floor the vertical scale at 8 MB/s so an idle machine draws a flat
-    /// line near the bottom instead of amplifying noise into a mountain
-    /// range.
-    private static let floorScale: Double = 8 * 1_048_576
-
-    var body: some View {
-        Canvas { ctx, size in
-            guard values.count > 1 else { return }
-            let peak = max(values.max() ?? 0, Self.floorScale)
-            let dx = size.width / CGFloat(values.count - 1)
-            let y: (Double) -> CGFloat = { v in
-                size.height - CGFloat(min(v / peak, 1)) * (size.height - lineWidth) - lineWidth / 2
-            }
-
-            var line = Path()
-            line.move(to: CGPoint(x: 0, y: y(values[0])))
-            for i in 1..<values.count {
-                line.addLine(to: CGPoint(x: dx * CGFloat(i), y: y(values[i])))
-            }
-
-            var fill = line
-            fill.addLine(to: CGPoint(x: size.width, y: size.height))
-            fill.addLine(to: CGPoint(x: 0, y: size.height))
-            fill.closeSubpath()
-
-            ctx.fill(fill, with: .linearGradient(
-                Gradient(colors: [tint.opacity(0.45), tint.opacity(0.02)]),
-                startPoint: CGPoint(x: 0, y: 0),
-                endPoint: CGPoint(x: 0, y: size.height)
-            ))
-            ctx.stroke(line, with: .color(tint), lineWidth: lineWidth)
-        }
-        // Deliberately NOT .drawingGroup(): for a two-path Canvas this size
-        // the offscreen Metal render costs more than it saves, and it would
-        // be paid once a second forever.
-    }
-}
-
 // MARK: - Small building blocks
-
-private struct Cell: View {
-    let title: String
-    let value: String
-    var tint: Color = .white
-    var detail: String? = nil
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(title)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(Color(white: 0.55))
-                .lineLimit(1).minimumScaleFactor(0.75)
-            Text(value)
-                .font(.system(size: 13, weight: .semibold).monospacedDigit())
-                .foregroundStyle(tint)
-                .lineLimit(1).minimumScaleFactor(0.7)
-            if let detail {
-                Text(detail)
-                    .font(.system(size: 9).monospacedDigit())
-                    .foregroundStyle(Color(white: 0.45))
-                    .lineLimit(1).minimumScaleFactor(0.75)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct MiniStat: View {
-    let title: String
-    let value: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .font(.system(size: 8.5, weight: .medium))
-                .foregroundStyle(Color(white: 0.48))
-                .lineLimit(1).minimumScaleFactor(0.7)
-            Text(value)
-                .font(.system(size: 11, weight: .medium).monospacedDigit())
-                .foregroundStyle(Color(white: 0.86))
-                .lineLimit(1).minimumScaleFactor(0.65)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
 
 private struct PressureDot: View {
     let level: MemoryPressureLevel?
@@ -248,43 +154,20 @@ private struct PressureDot: View {
 
 // MARK: - Collapsed strip content
 
-/// LEFT of the camera housing: the kernel's own pressure verdict, and the
-/// decompression sparkline. Nothing else — there is room for about two
-/// glyphs and a number, and putting CPU% here instead is the single most
-/// common design mistake in this category.
+/// LEFT of the camera housing: the kernel's pressure verdict as a single
+/// coloured dot. That is the whole collapsed readout.
+///
+/// The island can never be narrower than the physical notch (179 pt here),
+/// so the only width actually available to trade away is the two side
+/// wings. A sparkline and the top app's name used to live in them, which
+/// cost 208 pt of wing; a dot costs 26. Everything that was there is one
+/// hover away in the panel.
 private struct LeadingStrip: View {
     let level: MemoryPressureLevel?
-    let spark: [Double]
-    let current: Double?
 
     var body: some View {
-        HStack(spacing: 6) {
-            PressureDot(level: level)
-            Sparkline(values: spark, tint: IslandPalette.color(for: level))
-                .frame(width: 54, height: 16)
-        }
-        .padding(.trailing, 8)
-    }
-}
-
-/// RIGHT of the camera housing: the single largest app by phys_footprint.
-/// Name plus size, nothing else.
-private struct TrailingStrip: View {
-    let app: AppUsage?
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Text(app?.name ?? "—")
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(Color(white: 0.72))
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Text(UIFmt.bytes(app?.footprintBytes))
-                .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                .foregroundStyle(.white)
-                .fixedSize()
-        }
-        .padding(.leading, 8)
+        PressureDot(level: level, size: 8)
+            .padding(.trailing, 9)
     }
 }
 
@@ -292,7 +175,6 @@ private struct TrailingStrip: View {
 
 private struct MemoryHero: View {
     let memory: MemoryMetrics?
-    let spark: [Double]
 
     private var tint: Color { IslandPalette.color(for: memory?.pressureLevel) }
 
@@ -333,51 +215,14 @@ private struct MemoryHero: View {
                 Text("\(UIFmt.bytes(memory?.usedBytes)) из \(UIFmt.bytes(memory?.totalBytes)) занято")
                     .font(.system(size: 9.5).monospacedDigit())
                     .foregroundStyle(Color(white: 0.55))
+
+                Text("Своп \(UIFmt.bytes(memory?.swapUsedBytes)) из \(UIFmt.bytes(memory?.swapTotalBytes))")
+                    .font(.system(size: 9.5).monospacedDigit())
+                    .foregroundStyle(Color(white: 0.45))
             }
-            .frame(width: 190)
+            .frame(width: 190, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(UIFmt.mbps(memory?.rates?.decompressionBytesPerSec))
-                        .font(.system(size: 20, weight: .bold).monospacedDigit())
-                        .foregroundStyle(.white)
-                    Text("распаковка компрессора")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(Color(white: 0.5))
-                }
-                Sparkline(values: spark, tint: tint, lineWidth: 1.6)
-                    .frame(height: 38)
-                Text("60 с, шаг 2 с · выше 50 МБ/с — это и есть «тормозит»")
-                    .font(.system(size: 8.5))
-                    .foregroundStyle(Color(white: 0.38))
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-}
-
-private struct MemoryRatesRow: View {
-    let memory: MemoryMetrics?
-
-    var body: some View {
-        let r = memory?.rates
-        HStack(alignment: .top, spacing: 10) {
-            Cell(title: "СЖАТИЕ", value: UIFmt.mbps(r?.compressionBytesPerSec),
-                 detail: UIFmt.pages(r?.compressionsPerSec))
-            Cell(title: "РАСПАКОВКА", value: UIFmt.mbps(r?.decompressionBytesPerSec),
-                 detail: UIFmt.pages(r?.decompressionsPerSec))
-            Cell(title: "ПОДКАЧКА", value: UIFmt.mbps(r?.pageInBytesPerSec),
-                 detail: UIFmt.pages(r?.pageInsPerSec))
-            // Rate, not size — and on this machine it is normally 0 while
-            // the compressor above is doing 50+ MB/s. Showing them side by
-            // side is how the user learns swap is not the problem.
-            Cell(title: "СВОП ЗАП / ЧТ",
-                 value: "\(UIFmt.count(r?.swapOutsPerSec)) / \(UIFmt.count(r?.swapInsPerSec))",
-                 detail: "стр/с")
-            Cell(title: "СВОП ЗАНЯТО", value: UIFmt.bytes(memory?.swapUsedBytes),
-                 detail: "из \(UIFmt.bytes(memory?.swapTotalBytes))")
-            Cell(title: "СЖАТО", value: UIFmt.bytes(memory?.compressedBytes),
-                 detail: memory?.compressionRatio.map { String(format: "×%.1f сжатие", $0) } ?? "—")
+            Spacer(minLength: 0)
         }
     }
 }
@@ -504,58 +349,12 @@ private struct SmallButton: View {
     }
 }
 
-private struct SystemStrip: View {
-    let snapshot: MetricsSnapshot?
-
-    var body: some View {
-        let p = snapshot?.power
-        let t = snapshot?.thermal
-        HStack(alignment: .top, spacing: 8) {
-            MiniStat(title: "GPU", value: UIFmt.pct(snapshot?.gpu?.utilization))
-            MiniStat(title: "ВТ CPU/GPU",
-                     value: "\(UIFmt.shortWatts(p?.cpuWatts))/\(UIFmt.shortWatts(p?.gpuWatts))")
-            MiniStat(title: "СИСТЕМА", value: UIFmt.watts(p?.systemWatts))
-            // cpuPeakCelsius is a HOT-SPOT sensor: this M2 carries three
-            // sensors per P-core and the third runs 10-25 C above its
-            // siblings, so it reads ~100 C on a machine that is fine.
-            // Labelling it "температура CPU" would be a lie.
-            MiniStat(title: "ГОР. ТОЧКА",
-                     value: UIFmt.celsius(t?.cpuPeakCelsius))
-            MiniStat(title: "P/E °C",
-                     value: "\(UIFmt.celsius(t?.cpuPerformanceCelsius))/\(UIFmt.celsius(t?.cpuEfficiencyCelsius))")
-            MiniStat(title: "ТЕРМО",
-                     value: (t?.state.label).map(ruThermal) ?? "—")
-            MiniStat(title: "БАТАРЕЯ",
-                     value: UIFmt.pct(snapshot?.battery?.charge))
-            MiniStat(title: "ДИСК ЗАП", value: UIFmt.rate(snapshot?.disk?.writeBytesPerSec))
-            MiniStat(title: "СЕТЬ ↓/↑",
-                     value: UIFmt.pairRate(snapshot?.network?.bytesInPerSec,
-                                           snapshot?.network?.bytesOutPerSec))
-                .frame(minWidth: 84)
-        }
-    }
-
-    private func ruThermal(_ s: String) -> String {
-        switch s {
-        case "Nominal": return "норма"
-        case "Fair": return "умерен."
-        case "Serious": return "высокий"
-        case "Critical": return "критич."
-        default: return s
-        }
-    }
-}
-
 private struct Dashboard: View {
     @ObservedObject var model: IslandModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            MemoryHero(memory: model.snapshot?.memory, spark: model.spark)
-
-            Divider().overlay(Color(white: 0.16))
-
-            MemoryRatesRow(memory: model.snapshot?.memory)
+            MemoryHero(memory: model.snapshot?.memory)
 
             Divider().overlay(Color(white: 0.16))
 
@@ -590,10 +389,6 @@ private struct Dashboard: View {
             }
 
             Spacer(minLength: 0)
-
-            Divider().overlay(Color(white: 0.16))
-
-            SystemStrip(snapshot: model.snapshot)
         }
     }
 }
@@ -605,11 +400,16 @@ struct IslandView: View {
 
     /// Fixed expanded geometry. The WINDOW never changes size; only this
     /// content does.
-    static let expandedContentWidth: CGFloat = 700
-    static let expandedHeight: CGFloat = 402
+    // Sized for what the panel actually holds now: the memory block
+    // (~75pt), a divider, and five 22pt app rows under their header —
+    // roughly 220pt of content plus the 32pt notch strip and 22pt of
+    // vertical padding. Was 700x402 when the panel also carried the
+    // compressor rates row and the GPU/power/thermal/battery strip.
+    static let expandedContentWidth: CGFloat = 560
+    static let expandedHeight: CGFloat = 280
     /// How much readout sits either side of the camera housing when
-    /// collapsed.
-    static let collapsedSideWidth: CGFloat = 104
+    /// collapsed. Just wide enough for the pressure dot and its padding.
+    static let collapsedSideWidth: CGFloat = 26
 
     private var isOpen: Bool { model.status == .opened }
 
@@ -652,17 +452,17 @@ struct IslandView: View {
         VStack(alignment: .leading, spacing: 0) {
             // --- the strip that straddles the camera housing ---
             HStack(spacing: 0) {
-                LeadingStrip(level: model.pressureLevel,
-                             spark: model.spark,
-                             current: model.snapshot?.memory?.rates?.decompressionBytesPerSec)
+                LeadingStrip(level: model.pressureLevel)
                     .frame(width: sideWidth, height: model.notchSize.height, alignment: .trailing)
 
                 // The camera housing. NEVER draw here: it is opaque glass.
                 Color.clear
                     .frame(width: model.notchSize.width, height: model.notchSize.height)
 
-                TrailingStrip(app: model.topApp)
-                    .frame(width: sideWidth, height: model.notchSize.height, alignment: .leading)
+                // Empty wing, kept only so the pill stays symmetric about
+                // the camera housing.
+                Color.clear
+                    .frame(width: sideWidth, height: model.notchSize.height)
             }
 
             // --- the dashboard, only in the tree while it is out ---

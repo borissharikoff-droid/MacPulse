@@ -20,6 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         // event monitors, unlike keyboard ones, need no permission either.
         NSApp.setActivationPolicy(.accessory)
 
+        // Inert unless --cost-log is on the command line. See IdleCost.swift.
+        IdleCost.armIfRequested()
+
         setupStatusItem()
 
         // The island starts the metrics engine and subscribes itself.
@@ -70,7 +73,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         // says what it does and does not oversell it: this frees disk, not
         // memory. The action that frees memory is a per-app Quit button in
         // the island panel.
-        cleanupItem = NSMenuItem(title: "Очистить кеши и логи (освобождает диск, не память)",
+        // The "frees disk, not memory" caveat lives in the tooltip below —
+        // in the title it was the second-longest string in the menu.
+        cleanupItem = NSMenuItem(title: "Очистить кэши и логи",
                                  action: #selector(cleanupTapped), keyEquivalent: "")
         cleanupItem.target = self
         cleanupItem.toolTip = """
@@ -104,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
         statusItem.button?.image = StatusItemIcon.image(cpu: cpuBusy, ram: ramUsed, pressure: pressure)
         statusItem.button?.toolTip = tooltip(snapshot)
-        headerItem.title = headerText(snapshot)
+        headerItem.attributedTitle = headerAttributed(snapshot)
     }
 
     private func tooltip(_ s: MetricsSnapshot) -> String {
@@ -114,19 +119,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             + "давление: \(IslandPalette.label(for: s.memory?.pressureLevel))"
     }
 
-    private func headerText(_ s: MetricsSnapshot) -> String {
+    /// NSMenuItem.title collapses embedded newlines into ONE line, so the old
+    /// multi-line string rendered as a single ~140-character run that set the
+    /// menu's width. attributedTitle does lay out newlines, and also lets the
+    /// header sit at 11pt instead of the 14pt menu font.
+    ///
+    /// Kept deliberately short: the island itself already shows pressure, the
+    /// decompression trace and the top app, so this is a glance-sized echo,
+    /// not a second dashboard.
+    private func headerAttributed(_ s: MetricsSnapshot) -> NSAttributedString {
         var lines: [String] = []
         if let m = s.memory {
-            lines.append("Давление памяти: \(IslandPalette.label(for: m.pressureLevel))")
-            lines.append("Распаковка: \(UIFmt.mbps(m.rates?.decompressionBytesPerSec))"
-                         + "   Сжатие: \(UIFmt.mbps(m.rates?.compressionBytesPerSec))")
-            lines.append("Память: \(UIFmt.bytes(m.usedBytes)) из \(UIFmt.bytes(m.totalBytes))"
-                         + "   Своп: \(UIFmt.bytes(m.swapUsedBytes))")
+            lines.append("Давление: \(IslandPalette.label(for: m.pressureLevel))")
+            lines.append("Распаковка \(UIFmt.mbps(m.rates?.decompressionBytesPerSec))"
+                         + "   Своп \(UIFmt.bytes(m.swapUsedBytes))")
         }
         if let top = s.processes?.apps.first {
-            lines.append("Самое крупное: \(top.name) — \(UIFmt.bytes(top.footprintBytes))")
+            lines.append("\(top.name) — \(UIFmt.bytes(top.footprintBytes))")
         }
-        return lines.isEmpty ? "MacPulse" : lines.joined(separator: "\n")
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 2
+        return NSAttributedString(
+            string: lines.isEmpty ? "MacPulse" : lines.joined(separator: "\n"),
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: paragraph,
+            ]
+        )
     }
 
     // MARK: - NSMenuDelegate / validation
@@ -155,7 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         guard !isCleaning else { return }
         isCleaning = true
         cleanupItem.isEnabled = false
-        let restingTitle = "Очистить кеши и логи (освобождает диск, не память)"
+        let restingTitle = "Очистить кэши и логи"
         cleanupItem.title = "Очищаю…"
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in

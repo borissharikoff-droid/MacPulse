@@ -114,8 +114,20 @@ enum BatterySampler {
                 cycleCount = props["CycleCount"] as? Int
                 design = props["DesignCapacity"] as? Int
                 currentCapacity = props["AppleRawCurrentCapacity"] as? Int
-                if let raw = props["AppleRawMaxCapacity"] as? Int, let d = design, d > 0 {
-                    health = Double(raw) / Double(d)
+                // Raw capacity ratio — deliberately NOT the same number as
+                // System Settings' "Maximum Capacity", and it should never be
+                // labelled as such. Apple's figure is a smoothed internal
+                // state-of-health estimate that no exposed key reproduces:
+                // measured here, DesignCapacity 4563 with AppleRawMaxCapacity
+                // 3885 (85.1%) and NominalChargeCapacity 4012 (87.9%) while
+                // the OS displayed 91%. NominalChargeCapacity is the nearer
+                // and steadier of the two — AppleRawMaxCapacity swings with
+                // charge state and temperature (3777 -> 3885 within an hour
+                // on this machine) — so prefer it and fall back to raw.
+                if let d = design, d > 0 {
+                    let full = (props["NominalChargeCapacity"] as? Int)
+                        ?? (props["AppleRawMaxCapacity"] as? Int)
+                    health = full.map { Double($0) / Double(d) }
                 }
                 if let mv = props["Voltage"] as? Int { voltage = Double(mv) / 1000 }
                 if let ma = props["Amperage"] as? Int { amperage = Double(ma) / 1000 }
