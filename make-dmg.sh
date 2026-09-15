@@ -52,16 +52,16 @@ fi
 # WINDOW_W / WINDOW_H / ICON_SIZE / APP_X / APP_Y / APPS_X / APPS_Y.
 # A file named *@2x.png is treated as Retina and laid out at half its pixels.
 # ---------------------------------------------------------------------------
-BACKGROUND=""
-for candidate in \
-  "dmg-assets/dmg-background@2x.png" \
-  "dmg-assets/background@2x.png" \
-  "dmg-assets/dmg-background.png" \
-  "dmg-assets/background.png" \
-  "dmg-assets/dmg-background.tiff" \
-  "dmg-assets/background.tiff"; do
-  if [ -f "$ROOT/$candidate" ]; then BACKGROUND="$ROOT/$candidate"; break; fi
+BG_1X=""; BG_2X=""
+for candidate in "dmg-assets/dmg-background.png" "dmg-assets/background.png"; do
+  [ -f "$ROOT/$candidate" ] && { BG_1X="$ROOT/$candidate"; break; }
 done
+for candidate in "dmg-assets/dmg-background@2x.png" "dmg-assets/background@2x.png"; do
+  [ -f "$ROOT/$candidate" ] && { BG_2X="$ROOT/$candidate"; break; }
+done
+# The @1x file is what sizes the window; if only the @2x exists, its pixels are
+# halved below.
+BACKGROUND="${BG_1X:-$BG_2X}"
 
 # ---------------------------------------------------------------------------
 # Stage
@@ -85,10 +85,26 @@ for asset in "Установить.command" "Если не открываетс�
 done
 chmod +x "$STAGE/Установить.command"
 
+# RETINA, and the reason this is not just a `cp`. Finder draws a DMG background
+# picture at ONE POINT PER PIXEL, so handing it the 1280x800 @2x file in a
+# 640x400 window shows the top-left quarter of the artwork, not a crisp
+# version of it. The one thing Finder does understand is a multi-representation
+# TIFF, which is what `tiffutil -cathidpicheck` builds out of the two PNGs. If
+# that fails or only one size exists, the @1x PNG is used as-is: slightly soft
+# on a Retina display, never wrong.
+BG_STAGED=""
 if [ -n "$BACKGROUND" ]; then
   mkdir -p "$STAGE/.background"
-  cp "$BACKGROUND" "$STAGE/.background/background.${BACKGROUND##*.}"
-  echo "==> Background: ${BACKGROUND#$ROOT/}"
+  if [ -n "$BG_1X" ] && [ -n "$BG_2X" ] && command -v tiffutil >/dev/null 2>&1 \
+     && tiffutil -cathidpicheck "$BG_1X" "$BG_2X" -out "$STAGE/.background/background.tiff" >/dev/null 2>&1; then
+    BG_STAGED="background.tiff"
+    echo "==> Background: ${BG_1X#$ROOT/} + ${BG_2X#$ROOT/} -> background.tiff (1x + 2x)"
+  else
+    BG_STAGED="background.${BACKGROUND##*.}"
+    rm -f "$STAGE/.background/background.tiff"
+    cp "$BACKGROUND" "$STAGE/.background/$BG_STAGED"
+    echo "==> Background: ${BACKGROUND#$ROOT/}"
+  fi
 else
   echo "==> No background in dmg-assets/ — building a plain DMG"
 fi
@@ -128,21 +144,29 @@ if command -v sips >/dev/null 2>&1; then
       *@2x.*) WINDOW_W=$((PW / 2)); WINDOW_H=$((PH / 2)) ;;
       *)      WINDOW_W="$PW";       WINDOW_H="$PH" ;;
     esac
+    echo "==> Artwork ${PW}x${PH} -> window ${WINDOW_W}x${WINDOW_H} pt"
   fi
 fi
 WINDOW_W="${WINDOW_W:-640}"
 WINDOW_H="${WINDOW_H:-400}"
-ICON_SIZE=112
-APP_X=$((WINDOW_W * 27 / 100))
-APPS_X=$((WINDOW_W * 73 / 100))
+# Defaults, expressed as fractions of the window so they survive a differently
+# sized background — and tuned so that at the 640x400 the artwork is actually
+# drawn for they come out at exactly the slots dmg-assets/dmg-layout.txt
+# specifies: 168,208 and 472,208 at icon size 128. The arrow in the artwork
+# points from one slot to the other, so these are not decoration.
+ICON_SIZE=128
+APP_X=$((WINDOW_W * 2625 / 10000))
+APPS_X=$((WINDOW_W * 7375 / 10000))
 APP_Y=$((WINDOW_H * 52 / 100))
 APPS_Y=$APP_Y
 
-# Let the artwork own the numbers if it wants to.
+# The artwork owns the numbers. dmg-assets/layout.conf is the machine-readable
+# half of dmg-layout.txt; if the icon is ever redrawn against a different
+# layout, that file is the one place this script needs to learn about it.
 if [ -f "$ROOT/dmg-assets/layout.conf" ]; then
   # shellcheck disable=SC1090
   . "$ROOT/dmg-assets/layout.conf"
-  echo "==> Layout overridden by dmg-assets/layout.conf"
+  echo "==> Layout from dmg-assets/layout.conf: ${WINDOW_W}x${WINDOW_H}, icons $ICON_SIZE, app $APP_X,$APP_Y, alias $APPS_X,$APPS_Y"
 fi
 
 STAGE_MB=$(du -sm "$STAGE" | cut -f1)
@@ -162,7 +186,7 @@ if [ ! -d "$MOUNT_POINT" ]; then
   MOUNT_POINT=$(hdiutil info | awk -v v="$VOL_NAME" '$0 ~ "/Volumes/"v {sub(/^.*\/Volumes/, "/Volumes"); print; exit}')
 fi
 
-BG_FILE=$(basename "$STAGE/.background/background.${BACKGROUND##*.}")
+BG_FILE="$BG_STAGED"
 
 echo "==> Laying out the window (Finder, best-effort, ${WINDOW_W}x${WINDOW_H})"
 cat > "$ROOT/Build/dmg-layout.applescript" <<APPLESCRIPT
