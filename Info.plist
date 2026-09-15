@@ -22,6 +22,10 @@
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>MacPulse показывает время до следующей встречи в островке.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>MacPulse показывает время до следующей встречи в островке.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

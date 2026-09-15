@@ -55,16 +55,40 @@ if BAD=$(grep -nE "$BANNED" "$ROOT"/Sources/*.swift | grep -vE ':[0-9]+:[[:space
   echo "$BAD" >&2
   exit 1
 fi
-# Exactly one file is allowed to open a socket at all.
+# Exactly one file is allowed to open a socket that can carry a byte anywhere.
+#
+# Sources/TunnelSampler.swift is the one exception, and it is a narrow one: a
+# PF_ROUTE descriptor is a kernel routing-table query channel, not a
+# connection. It has no peer, it cannot be connected or bound, nothing written
+# to it leaves the machine, and RTM_GET is exactly what route(8) does. It is
+# excluded from the sweep below and then checked SEPARATELY and more strictly
+# — one socket() call, of that exact form, and connect/bind/send/getaddrinfo
+# still banned there as everywhere. Exempting the file wholesale would have
+# been the weakening; this is not that. Both checks fail CLOSED: rename the
+# file and the sweep below catches it; delete the socket call and the count
+# check below catches that.
 if STRAY=$(grep -nE '(^|[^A-Za-z_])(socket|connect|getaddrinfo)[[:space:]]*\(' \
              "$ROOT"/Sources/*.swift \
            | grep -vE ':[0-9]+:[[:space:]]*//' \
-           | grep -v '/PultLink\.swift:'); then
+           | grep -v '/PultLink\.swift:' \
+           | grep -v '/TunnelSampler\.swift:'); then
   echo "error: CONTRACT — socket()/connect() outside Sources/PultLink.swift." >&2
   echo "       Every byte that leaves this process must go through that one file," >&2
   echo "       which can only ever form the address 127.0.0.1:8787." >&2
   echo "$STRAY" >&2
   exit 1
+fi
+TUNNEL_SRC="$ROOT/Sources/TunnelSampler.swift"
+if [ -f "$TUNNEL_SRC" ]; then
+  TUNNEL_CODE=$(grep -vE '^[[:space:]]*//' "$TUNNEL_SRC")
+  if [ "$(printf '%s\n' "$TUNNEL_CODE" | grep -cE '(^|[^A-Za-z_])socket[[:space:]]*\(')" != "1" ] \
+     || [ "$(printf '%s\n' "$TUNNEL_CODE" | grep -cE 'socket\(PF_ROUTE, SOCK_RAW, 0\)')" != "1" ] \
+     || printf '%s\n' "$TUNNEL_CODE" \
+          | grep -qE '(^|[^A-Za-z_])(connect|bind|sendto|sendmsg|getaddrinfo)[[:space:]]*\('; then
+    echo "error: CONTRACT — Sources/TunnelSampler.swift may open EXACTLY ONE" >&2
+    echo "       socket(PF_ROUTE, SOCK_RAW, 0) and must never connect, bind or send." >&2
+    exit 1
+  fi
 fi
 
 # IOKit covers AppleSMC, IOAccelerator, IOBlockStorageDriver, the device tree
@@ -78,6 +102,13 @@ fi
 # grant. CoreMediaIO is the camera half — device-level only; there is no
 # unprivileged per-process camera API on macOS. Neither pulls in anything the
 # contract forbids; the otool assertion after the build is what proves it.
+#
+# UserNotifications is the memory-pressure notifier — banners only, no
+# entitlement and no Info.plist key. EventKit is the next-meeting section; it
+# also drags in libswiftCoreLocation and libswiftCoreGraphics, which are Swift
+# overlays and not the frameworks themselves. Nothing here constructs a
+# CLLocationManager and no location prompt is possible. Neither framework can
+# open a connection, and the otool assertion below still has to pass.
 # Pin the DEPLOYMENT TARGET too. Without it swiftc stamps the binary with
 # whatever the host OS is (minos 26.0 was measured here) while Info.plist
 # advertised LSMinimumSystemVersion 13.0 — the two disagreeing is how you
@@ -93,7 +124,8 @@ swiftc -O \
   -o "$BIN_PATH" \
   "$ROOT"/Sources/*.swift \
   -framework AppKit -framework ServiceManagement -framework IOKit \
-  -framework CoreAudio -framework CoreMediaIO
+  -framework CoreAudio -framework CoreMediaIO \
+  -framework UserNotifications -framework EventKit
 
 # ============================================================================
 # CONTRACT GUARD (link side). The single most important check in the build.
