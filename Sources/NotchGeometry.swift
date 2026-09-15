@@ -139,17 +139,28 @@ struct NotchGeometry: Equatable, Sendable {
         self.topInset = metrics.hasPhysicalNotch ? 0 : (screen.mp_menubarHeight + 6)
     }
 
-    /// Island rect in screen coordinates for a given rendered size.
-    func islandRect(size: CGSize) -> CGRect {
-        CGRect(x: screenFrame.midX - size.width / 2,
-               y: screenFrame.maxY - topInset - size.height,
-               width: size.width,
-               height: size.height)
+    /// Island rect in screen coordinates for a drawn plate.
+    ///
+    /// THE ANCHOR IS THE CAMERA HOUSING, NOT THE PLATE. The housing is
+    /// physical glass centred on `screenFrame.midX` and it does not move;
+    /// the plate slides around it as the wings change size, which is what
+    /// `centerOffsetX` carries. With equal wings the offset is 0 and this
+    /// is the centred island that shipped before the wings became
+    /// asymmetric.
+    ///
+    /// `IslandView` applies the same offset to the drawn shape. Both come
+    /// from the same `IslandMetrics.Plate`, which is the only reason the
+    /// hit rect cannot drift off the shape.
+    func islandRect(_ plate: IslandMetrics.Plate) -> CGRect {
+        CGRect(x: screenFrame.midX - plate.size.width / 2 + plate.centerOffsetX,
+               y: screenFrame.maxY - topInset - plate.size.height,
+               width: plate.size.width,
+               height: plate.size.height)
     }
 
     /// Generous slop: the pointer skimming the very top edge of the screen
     /// (where it gets clamped) must still count as "in the notch".
-    func hitRect(size: CGSize) -> CGRect {
-        islandRect(size: size).insetBy(dx: -10, dy: -6)
+    func hitRect(_ plate: IslandMetrics.Plate) -> CGRect {
+        islandRect(plate).insetBy(dx: -10, dy: -6)
     }
 }

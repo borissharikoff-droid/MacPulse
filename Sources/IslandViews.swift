@@ -2,15 +2,25 @@ import AppKit
 import SwiftUI
 
 // =====================================================================
-// The island's SwiftUI layer.
+// The island's SwiftUI shell: palette, Russian-unit formatting, and the
+// root view. Everything else lives beside it —
+//
+//   IslandStrip.swift          the two collapsed wings
+//   IslandRail.swift           the expanded panel's router
+//   IslandSectionMemory.swift  the «Память» section
+//   IslandSection.swift        how to add another one
+//
+// It was one 522-line file holding palette + formatting + strip + hero +
+// rows + buttons + root. Splitting it was not tidiness: the panel is a
+// router now, and the next feature to land would otherwise have piled its
+// section onto the same file as the pressure dot.
 //
 // TWO LAYOUT FACTS DRIVE EVERYTHING HERE:
 //
 // 1. The notch is a PHYSICAL camera housing. Anything drawn in the middle
 //    `notchSize.width` points of the strip is invisible — it is behind
-//    opaque glass. So the collapsed readout lives in the menu bar strip
-//    immediately LEFT and RIGHT of the housing, and the centre column is
-//    deliberately empty.
+//    opaque glass. So the collapsed readout lives in the wings either
+//    side of the housing, and the centre column is deliberately empty.
 //
 // 2. MPNotchShape's concave top fillets live OUTSIDE the visual body, so
 //    the shape's total width is `contentWidth + 2 * topCornerRadius` and
@@ -135,285 +145,34 @@ enum UIFmt {
     }
 }
 
-// MARK: - Small building blocks
-
-private struct PressureDot: View {
-    let level: MemoryPressureLevel?
-    var size: CGFloat = 7
-
-    var body: some View {
-        Circle()
-            .fill(IslandPalette.color(for: level))
-            .frame(width: size, height: size)
-            .overlay(
-                Circle().stroke(IslandPalette.color(for: level).opacity(0.35), lineWidth: size * 0.5)
-                    .opacity(level == .critical ? 1 : 0)
-            )
-    }
-}
-
-// MARK: - Collapsed strip content
-
-/// LEFT of the camera housing: the kernel's pressure verdict as a single
-/// coloured dot. That is the whole collapsed readout.
-///
-/// The island can never be narrower than the physical notch (179 pt here),
-/// so the only width actually available to trade away is the two side
-/// wings. A sparkline and the top app's name used to live in them, which
-/// cost 208 pt of wing; a dot costs 26. Everything that was there is one
-/// hover away in the panel.
-private struct LeadingStrip: View {
-    let level: MemoryPressureLevel?
-
-    var body: some View {
-        PressureDot(level: level, size: 8)
-            .padding(.trailing, 9)
-    }
-}
-
-// MARK: - Expanded dashboard
-
-private struct MemoryHero: View {
-    let memory: MemoryMetrics?
-
-    private var tint: Color { IslandPalette.color(for: memory?.pressureLevel) }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    PressureDot(level: memory?.pressureLevel, size: 9)
-                    Text(IslandPalette.label(for: memory?.pressureLevel))
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(tint)
-                }
-                Text("Давление памяти (ядро)")
-                    .font(.system(size: 9))
-                    .foregroundStyle(Color(white: 0.5))
-
-                // Bar height only. This is a (wired + compressed) / total
-                // heuristic, NOT Apple's formula — Apple documents the
-                // factors and never the expression — so it is never
-                // labelled "как в Мониторинге системы". The COLOUR comes
-                // from the kernel's own pressure level above.
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color(white: 0.18))
-                        // The heuristic is Optional and nil means "not
-                        // measurable" (total RAM unknown). Then the track is
-                        // drawn with NO fill at all rather than a fill of
-                        // width 0 standing in for a measured zero.
-                        if let heuristic = memory?.pressureHeuristic {
-                            Capsule().fill(tint)
-                                .frame(width: geo.size.width * CGFloat(min(max(heuristic, 0), 1)))
-                        }
-                    }
-                }
-                .frame(height: 5)
-                .padding(.top, 2)
-
-                Text("\(UIFmt.bytes(memory?.usedBytes)) из \(UIFmt.bytes(memory?.totalBytes)) занято")
-                    .font(.system(size: 9.5).monospacedDigit())
-                    .foregroundStyle(Color(white: 0.55))
-
-                Text("Своп \(UIFmt.bytes(memory?.swapUsedBytes)) из \(UIFmt.bytes(memory?.swapTotalBytes))")
-                    .font(.system(size: 9.5).monospacedDigit())
-                    .foregroundStyle(Color(white: 0.45))
-            }
-            .frame(width: 190, alignment: .leading)
-
-            Spacer(minLength: 0)
-        }
-    }
-}
-
-private struct AppRow: View {
-    let app: AppUsage
-    let phase: QuitPhase
-    let onQuit: () -> Void
-    let onForce: () -> Void
-
-    @State private var hovering = false
-
-    private var icon: NSImage? {
-        NSRunningApplication(processIdentifier: app.pid)?.icon
-    }
-
-    var body: some View {
-        HStack(spacing: 7) {
-            if let icon {
-                Image(nsImage: icon).resizable().frame(width: 15, height: 15)
-            } else {
-                RoundedRectangle(cornerRadius: 3).fill(Color(white: 0.22))
-                    .frame(width: 15, height: 15)
-            }
-
-            Text(app.name)
-                .font(.system(size: 11.5))
-                .foregroundStyle(Color(white: 0.9))
-                .lineLimit(1)
-                .truncationMode(.middle)
-
-            if app.memberPIDs.count > 1 {
-                Text("\(app.memberPIDs.count)")
-                    .font(.system(size: 8.5, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(Color(white: 0.5))
-                    .padding(.horizontal, 3).padding(.vertical, 1)
-                    .background(RoundedRectangle(cornerRadius: 3).fill(Color(white: 0.16)))
-                    .help("процессов в группе: \(app.memberPIDs.count)")
-            }
-
-            Spacer(minLength: 6)
-
-            Text(UIFmt.pct(app.cpuPercent.map { $0 / 100 }))
-                .font(.system(size: 10).monospacedDigit())
-                .foregroundStyle(Color(white: 0.5))
-                .frame(width: 42, alignment: .trailing)
-
-            Text(UIFmt.bytes(app.footprintBytes))
-                .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                .foregroundStyle(.white)
-                .frame(width: 62, alignment: .trailing)
-
-            action
-                .frame(width: 96, alignment: .trailing)
-        }
-        .frame(height: 22)
-        .padding(.horizontal, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 5)
-                .fill(Color.white.opacity(hovering ? 0.06 : 0))
-        )
-        .onHover { hovering = $0 }
-    }
-
-    @ViewBuilder private var action: some View {
-        switch phase {
-        case .idle:
-            if app.isApplication {
-                SmallButton(title: "Завершить", tint: Color(white: 0.85), onTap: onQuit)
-            } else {
-                // Not an NSRunningApplication: a daemon or helper we have no
-                // safe, graceful way to stop. We show the footprint and stop
-                // there — MacPulse never kills anything the user did not
-                // individually click, and there is nothing to click here.
-                Text("фоновый процесс")
-                    .font(.system(size: 9))
-                    .foregroundStyle(Color(white: 0.38))
-            }
-        case .asked:
-            Text("закрывается…")
-                .font(.system(size: 9.5))
-                .foregroundStyle(Color(white: 0.55))
-        case .needsForce:
-            // SECOND, EXPLICIT step, offered only because the graceful
-            // quit demonstrably did not take. Never automatic.
-            SmallButton(title: "Принудительно", tint: IslandPalette.critical, onTap: onForce)
-                .help("Приложение не закрылось само — возможно, есть несохранённые изменения. Принудительное завершение их потеряет.")
-        case .forced:
-            Text("завершается…")
-                .font(.system(size: 9.5))
-                .foregroundStyle(IslandPalette.critical.opacity(0.8))
-        case .gone:
-            Text("закрыто ✓")
-                .font(.system(size: 9.5))
-                .foregroundStyle(IslandPalette.normal)
-        case .failed(let why):
-            Text(why)
-                .font(.system(size: 9))
-                .foregroundStyle(IslandPalette.warning)
-        }
-    }
-}
-
-private struct SmallButton: View {
-    let title: String
-    let tint: Color
-    let onTap: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: onTap) {
-            Text(title)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(hovering ? Color.black : tint)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 2.5)
-                .background(
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(hovering ? tint : Color.white.opacity(0.10))
-                )
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-    }
-}
-
-private struct Dashboard: View {
-    @ObservedObject var model: IslandModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            MemoryHero(memory: model.snapshot?.memory)
-
-            Divider().overlay(Color(white: 0.16))
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text("ВАШИ ПРИЛОЖЕНИЯ — ПО PHYS_FOOTPRINT")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Color(white: 0.55))
-                    Spacer()
-                    if let pm = model.snapshot?.processes {
-                        // Honest coverage note: unprivileged we can only
-                        // introspect our OWN uid, so this is never "все
-                        // процессы". top sees everything only because it is
-                        // setuid root.
-                        Text("видно \(pm.introspectedCount) из \(pm.pidCount) процессов (только ваш пользователь)")
-                            .font(.system(size: 8.5))
-                            .foregroundStyle(Color(white: 0.38))
-                    }
-                }
-                .padding(.horizontal, 6)
-
-                if model.topApps.isEmpty {
-                    Text("—").font(.system(size: 11)).foregroundStyle(Color(white: 0.4))
-                        .padding(.horizontal, 6)
-                }
-                ForEach(model.topApps) { app in
-                    AppRow(app: app,
-                           phase: model.quitPhase(for: app.pid),
-                           onQuit: { model.requestQuit(app) },
-                           onForce: { model.forceQuit(app) })
-                }
-            }
-
-            Spacer(minLength: 0)
-        }
-    }
-}
-
 // MARK: - Root
 
 struct IslandView: View {
     @ObservedObject var model: IslandModel
 
-    /// Fixed expanded geometry. The WINDOW never changes size; only this
-    /// content does.
-    // Sized for what the panel actually holds now: the memory block
-    // (~75pt), a divider, and five 22pt app rows under their header —
-    // roughly 220pt of content plus the 32pt notch strip and 22pt of
-    // vertical padding. Was 700x402 when the panel also carried the
-    // compressor rates row and the GPU/power/thermal/battery strip.
-    static let expandedContentWidth: CGFloat = 560
-    static let expandedHeight: CGFloat = 280
-    /// How much readout sits either side of the camera housing when
-    /// collapsed. Just wide enough for the pressure dot and its padding.
-    static let collapsedSideWidth: CGFloat = 26
-
     private var isOpen: Bool { model.status == .opened }
 
-    private var topCornerRadius: CGFloat { isOpen ? 19 : 6 }
+    /// The plate this state draws, straight out of IslandMetrics. The
+    /// CONTROLLER hit-tests the very same values — that is the point of
+    /// there being one function. Never open-code the arithmetic here.
+    private var plate: IslandMetrics.Plate {
+        switch model.status {
+        case .opened:
+            return IslandMetrics.openedPlate()
+        case .popping:
+            return IslandMetrics.collapsedPlate(notch: model.notchSize,
+                                                leading: model.leadingWingWidth,
+                                                trailing: model.trailingWingWidth,
+                                                popping: true)
+        case .closed:
+            return IslandMetrics.collapsedPlate(notch: model.notchSize,
+                                                leading: model.leadingWingWidth,
+                                                trailing: model.trailingWingWidth)
+        }
+    }
+
+    private var topCornerRadius: CGFloat { plate.fillet }
+
     private var bottomCornerRadius: CGFloat {
         switch model.status {
         case .opened: return 24
@@ -422,27 +181,29 @@ struct IslandView: View {
         }
     }
 
-    private var contentWidth: CGFloat {
-        isOpen
-            ? Self.expandedContentWidth
-            : model.notchSize.width + Self.collapsedSideWidth * 2
-    }
+    /// Plate minus the fillets: what the content actually gets.
+    private var contentWidth: CGFloat { plate.size.width - plate.fillet * 2 }
+    private var bodyHeight: CGFloat { plate.size.height }
 
-    private var bodyHeight: CGFloat {
-        switch model.status {
-        case .opened: return Self.expandedHeight
-        case .popping: return model.notchSize.height + 3
-        case .closed: return model.notchSize.height
-        }
+    /// Wing widths for THIS state. Collapsed they are the model's two
+    /// (asymmetric) values; open the panel is symmetric about the housing
+    /// and both sides are whatever is left of 560.
+    private var leadingStripWidth: CGFloat {
+        isOpen ? max(0, (contentWidth - model.notchSize.width) / 2) : model.leadingWingWidth
     }
-
-    private var sideWidth: CGFloat {
-        max(0, (contentWidth - model.notchSize.width) / 2)
+    private var trailingStripWidth: CGFloat {
+        isOpen ? max(0, (contentWidth - model.notchSize.width) / 2) : model.trailingWingWidth
     }
 
     var body: some View {
         VStack(spacing: 0) {
             island
+                // The panel spans the whole screen width and centres its
+                // content, so an asymmetric island has to slide to keep the
+                // camera housing — which is physical and does not move —
+                // under the middle column. Same number the controller
+                // offsets its hit rect by.
+                .offset(x: plate.centerOffsetX)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -452,26 +213,22 @@ struct IslandView: View {
         VStack(alignment: .leading, spacing: 0) {
             // --- the strip that straddles the camera housing ---
             HStack(spacing: 0) {
-                LeadingStrip(level: model.pressureLevel)
-                    .frame(width: sideWidth, height: model.notchSize.height, alignment: .trailing)
+                IslandLeadingWing(pressure: model.strip.pressure)
+                    .frame(width: leadingStripWidth,
+                           height: model.notchSize.height, alignment: .trailing)
 
                 // The camera housing. NEVER draw here: it is opaque glass.
                 Color.clear
                     .frame(width: model.notchSize.width, height: model.notchSize.height)
 
-                // Empty wing, kept only so the pill stays symmetric about
-                // the camera housing.
-                Color.clear
-                    .frame(width: sideWidth, height: model.notchSize.height)
+                IslandTrailingWing(model: model)
+                    .frame(width: trailingStripWidth,
+                           height: model.notchSize.height, alignment: .leading)
             }
 
-            // --- the dashboard, only in the tree while it is out ---
+            // --- the panel, only in the tree while it is out ---
             if isOpen {
-                Dashboard(model: model)
-                    .padding(.horizontal, 14)
-                    .padding(.top, 10)
-                    .padding(.bottom, 12)
-                    .frame(width: contentWidth, alignment: .leading)
+                IslandRouter(model: model)
                     .transition(
                         .opacity.combined(with: .scale(scale: 0.94, anchor: .top))
                     )

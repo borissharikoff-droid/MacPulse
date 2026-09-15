@@ -45,13 +45,39 @@ final class IslandController {
     private var screenSnapshot: [(uuid: String?, frame: CGRect)] = []
     private var observers: [NSObjectProtocol] = []
 
+    /// Where MacPulse's OWN menu bar item starts, in screen coordinates.
+    ///
+    /// `statusItem.button?.window?.frame.minX` — our own window, so no
+    /// permission of any kind, no Accessibility, no screen recording. The
+    /// trailing wing is bounded against it so it can never grow under the
+    /// app's own icon. Supplied by AppDelegate, which owns the item.
+    var statusItemMinX: (() -> CGFloat?)?
+    /// The item's window, observed for moves. Menu bar extras shuffle
+    /// whenever one is added, removed or Command-dragged, and the bound
+    /// has to follow without polling for it.
+    var statusItemWindow: (() -> NSWindow?)?
+
     // MARK: - Lifecycle
 
     func start() {
         model.start()
+        // The hit rect is derived from the wing widths, and the panel is
+        // ARMED from mouse-moved events. A wing that grows while the
+        // pointer sits still would otherwise leave the panel disarmed over
+        // its own new pixels until the user happened to move the mouse —
+        // and a hit rect that has drifted off the drawn shape is exactly
+        // how an island stops opening.
+        model.wingWidthsDidChange = { [weak self] in
+            self?.handlePointer(NSEvent.mouseLocation)
+        }
         rebuildForCurrentScreens()
         installNotifications()
         startMonitors()
+        // The status item exists by now; bound the wing against it.
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshTrailingWingLimit()
+            self?.observeStatusItemWindow()
+        }
 
         // Hidden diagnostic, same convention as `--probe` in main.swift:
         // pins the panel open at launch so the expanded layout can be
@@ -120,7 +146,7 @@ final class IslandController {
         // configuration: full screen width by a height tall enough for the
         // largest expanded state plus room for the SwiftUI shadow. Only
         // the content inside animates.
-        let height = IslandView.expandedHeight + 60
+        let height = IslandMetrics.panelHeight + 60
         let frame = NSRect(x: screen.frame.minX,
                            y: screen.frame.maxY - geo.topInset - height,
                            width: screen.frame.width,
@@ -157,46 +183,90 @@ final class IslandController {
     }
 
     // MARK: - Sizing
+    //
+    // EVERY rect below comes from `IslandMetrics.collapsedPlate` /
+    // `openedPlate`, and so does the shape `IslandView` draws. That is not
+    // a style preference.
+    //
+    // This file used to compute the collapsed width itself, as
+    // `notch.width + IslandView.collapsedSideWidth * 2 + 6 * 2`. That was
+    // correct only while both wings were one static constant. The trailing
+    // wing is dynamic now, and a hit rect derived from the old constant
+    // would stop matching the drawn plate the first time the wing grew:
+    // narrower than the shape and the island refuses to open over its own
+    // right-hand pixels, wider and it arms the panel over bare menu bar
+    // and swallows clicks meant for the menu bar extras. Derive, never
+    // re-derive.
 
-    private var collapsedBodySize: CGSize {
-        let n = model.notchSize
-        return CGSize(width: n.width + IslandView.collapsedSideWidth * 2 + 6 * 2,
-                      height: n.height)
+    private var collapsedPlate: IslandMetrics.Plate {
+        IslandMetrics.collapsedPlate(notch: model.notchSize,
+                                     leading: model.leadingWingWidth,
+                                     trailing: model.trailingWingWidth)
     }
 
-    private var poppingBodySize: CGSize {
-        var s = collapsedBodySize
-        s.height += 3
-        return s
-    }
-
-    private var openedBodySize: CGSize {
-        CGSize(width: IslandView.expandedContentWidth + 19 * 2,
-               height: IslandView.expandedHeight)
+    private var poppingPlate: IslandMetrics.Plate {
+        IslandMetrics.collapsedPlate(notch: model.notchSize,
+                                     leading: model.leadingWingWidth,
+                                     trailing: model.trailingWingWidth,
+                                     popping: true)
     }
 
     private var activeHitRect: CGRect {
         guard let geometry else { return .null }
         switch model.status {
-        case .opened: return geometry.hitRect(size: openedBodySize)
-        case .popping: return geometry.hitRect(size: poppingBodySize)
-        case .closed: return geometry.hitRect(size: collapsedBodySize)
+        case .opened: return geometry.hitRect(IslandMetrics.openedPlate())
+        case .popping: return geometry.hitRect(poppingPlate)
+        case .closed: return geometry.hitRect(collapsedPlate)
         }
     }
 
     private var collapsedHitRect: CGRect {
-        geometry?.hitRect(size: collapsedBodySize) ?? .null
+        geometry?.hitRect(collapsedPlate) ?? .null
     }
 
     /// The strip row at the very top of the opened island — clicking there
-    /// is "toggle the pin", as opposed to clicking into the dashboard.
+    /// is "toggle the pin", as opposed to clicking into the panel.
     private var stripHitRect: CGRect {
         guard let geometry else { return .null }
-        let opened = geometry.islandRect(size: openedBodySize)
+        let opened = geometry.islandRect(IslandMetrics.openedPlate())
         return CGRect(x: opened.minX,
                       y: opened.maxY - model.notchSize.height,
                       width: opened.width,
                       height: model.notchSize.height)
+    }
+
+    // MARK: - The trailing wing's runtime bound
+
+    /// Recompute how far right the trailing wing may go before it would
+    /// sit under MacPulse's own menu bar item, and hand the bound to the
+    /// model. Called at launch, on every screen-parameter change, and
+    /// whenever the status item's window moves.
+    private func refreshTrailingWingLimit() {
+        guard let geometry else { return }
+        let limit = IslandMetrics.trailingWingLimit(
+            statusItemMinX: statusItemMinX?(),
+            screenMidX: geometry.screenFrame.midX,
+            notchWidth: geometry.notchSize.width
+        )
+        model.setTrailingWingLimit(limit)
+    }
+
+    private func observeStatusItemWindow() {
+        guard let window = statusItemWindow?() else { return }
+        // Push, not poll. Menu bar extras reshuffle when one is added,
+        // removed, or Command-dragged, and the window moves when they do.
+        observers.append(NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: window, queue: .main
+        ) { [weak self] _ in
+            self?.refreshTrailingWingLimit()
+        })
+        observers.append(NotificationCenter.default.addObserver(
+            forName: NSWindow.didResizeNotification,
+            object: window, queue: .main
+        ) { [weak self] _ in
+            self?.refreshTrailingWingLimit()
+        })
     }
 
     // MARK: - Monitors
@@ -431,6 +501,9 @@ final class IslandController {
         collapse(animated: false)
         rebuildForCurrentScreens()
         restartMonitors()
+        // A different screen means a different midX and a different place
+        // for the status item, so the wing's ceiling has to be redone.
+        refreshTrailingWingLimit()
     }
 
     private func fingerprint(_ screens: [(uuid: String?, frame: CGRect)]) -> [String] {

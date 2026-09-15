@@ -22,6 +22,17 @@ SDK="${MACPULSE_SDK:-/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk}"
 # If you ever add Sources/Foo/Bar.swift you must switch to a find-based list
 # (or `shopt -s globstar` + **) or the file will silently not be compiled.
 #
+# Guarded, because the failure mode does not look like what it is: a .swift
+# file in a subdirectory is never handed to swiftc, so its types simply do
+# not exist, and the error points at the CALLER — "cannot find X in scope" —
+# in a file that is perfectly correct.
+if find "$ROOT/Sources" -mindepth 2 -name '*.swift' -print -quit | grep -q .; then
+  echo "error: Sources/ must stay FLAT — the glob below does not descend into" >&2
+  echo "       subdirectories, so these files would silently not be compiled:" >&2
+  find "$ROOT/Sources" -mindepth 2 -name '*.swift' >&2
+  exit 1
+fi
+#
 # IOKit covers AppleSMC, IOAccelerator, IOBlockStorageDriver, the device tree
 # and IOKit.ps. libIOReport is NOT linked here — PowerSampler resolves it with
 # dlopen/dlsym so a missing private symbol degrades to "power unavailable"

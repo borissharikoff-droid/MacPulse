@@ -7,6 +7,14 @@ if CommandLine.arguments.contains("--probe") {
     Probe.run(arguments: CommandLine.arguments)
 }
 
+// Numeric check that the DRAWN island and the HIT-TESTED island are the
+// same rectangle at every trailing-wing width the model will grant, and
+// that the camera housing stays centred while the wing moves. See
+// IslandGeometryProbe. Exits non-zero if any invariant breaks.
+if CommandLine.arguments.contains("--wing-probe") {
+    IslandGeometryProbe.run(arguments: CommandLine.arguments)
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
