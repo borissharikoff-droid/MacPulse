@@ -108,7 +108,17 @@ final class CPUSampler {
                           vm_size_t(Int(infoCount) * MemoryLayout<integer_t>.stride))
         }
 
+        // `array` is a raw pointer with no bounds checking whatsoever, and
+        // cpuCount and infoCount are two INDEPENDENT out-parameters: trusting
+        // cpuCount to describe the buffer's length is an out-of-bounds read
+        // waiting for the day the kernel returns fewer entries than cores.
+        // The buffer must hold cpuCount * CPU_STATE_MAX integer_t.
+        //
+        // Computed in Int, not in the 32-bit out-parameter types, so the
+        // multiplication cannot wrap. The defer above still runs, so a bail
+        // here does not leak the kernel's allocation.
         let stride = Int(CPU_STATE_MAX)
+        guard stride > 0, cpuCount > 0, Int(infoCount) >= Int(cpuCount) * stride else { return nil }
         var out: [[UInt32]] = []
         out.reserveCapacity(Int(cpuCount))
         for i in 0..<Int(cpuCount) {
