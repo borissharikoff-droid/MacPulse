@@ -12,6 +12,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     private var metricsToken: MetricsObserverToken?
     private var isCleaning = false
 
+    /// What the status item currently DRAWS. A tick whose signature is
+    /// unchanged does not rebuild the NSImage — see StatusItemIcon.
+    private var drawnSignature: StatusItemIcon.Signature?
+    /// Likewise for the tooltip string: assigning an identical string
+    /// still makes AppKit rebuild the button's tracking rectangle.
+    private var drawnToolTip: String?
+    /// The menu's header is an NSAttributedString laid out from three
+    /// formatted lines. Nobody can read it while the menu is shut, so it
+    /// is only built while the menu is open — `menuWillOpen` already
+    /// forces a fresh sample, so it is never stale when it matters.
+    private var isMenuOpen = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // MacPulse only reads system counters and touches files under
         // ~/Library/Caches and ~/Library/Logs — it needs no TCC-gated
@@ -24,6 +36,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         IdleCost.armIfRequested()
 
         setupStatusItem()
+
+        // The island's trailing wing is bounded against MacPulse's OWN
+        // menu bar item, so it can never grow under it. `window?.frame` on
+        // our own status item window needs no permission whatsoever — no
+        // Accessibility, no screen recording. Handed over as closures
+        // rather than as the NSStatusItem so the controller cannot reach
+        // anything else on it.
+        island.statusItemMinX = { [weak self] in self?.statusItem.button?.window?.frame.minX }
+        island.statusItemWindow = { [weak self] in self?.statusItem.button?.window }
 
         // The island starts the metrics engine and subscribes itself.
         island.start()
@@ -102,14 +123,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     }
 
     /// Called on the main thread by MetricsEngine after every sample.
+    ///
+    /// THREE GATES, all of them measured. Redrawing the 18x15 meter every
+    /// tick cost 0.389% of one core on its own (probe_ui), and the bars
+    /// only have 13 distinct heights, so the overwhelming majority of
+    /// those redraws produced the bitmap that was already on screen.
     private func renderStatusItem(_ snapshot: MetricsSnapshot) {
         let cpuBusy = snapshot.cpu?.overall.busy
         let ramUsed = snapshot.memory?.usedFraction
         let pressure = snapshot.memory?.pressureLevel
 
-        statusItem.button?.image = StatusItemIcon.image(cpu: cpuBusy, ram: ramUsed, pressure: pressure)
-        statusItem.button?.toolTip = tooltip(snapshot)
-        headerItem.attributedTitle = headerAttributed(snapshot)
+        let signature = StatusItemIcon.Signature(cpu: cpuBusy, ram: ramUsed, pressure: pressure)
+        if signature != drawnSignature {
+            drawnSignature = signature
+            statusItem.button?.image = StatusItemIcon.image(cpu: cpuBusy, ram: ramUsed, pressure: pressure)
+        }
+
+        let tip = tooltip(snapshot)
+        if tip != drawnToolTip {
+            drawnToolTip = tip
+            statusItem.button?.toolTip = tip
+        }
+
+        // Only while somebody can actually see it.
+        if isMenuOpen {
+            headerItem.attributedTitle = headerAttributed(snapshot)
+        }
     }
 
     private func tooltip(_ s: MetricsSnapshot) -> String {
@@ -153,10 +192,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     // MARK: - NSMenuDelegate / validation
 
     func menuWillOpen(_ menu: NSMenu) {
+        isMenuOpen = true
+        // The header is not built while the menu is shut, so seed it from
+        // the snapshot we already have before asking for a fresh one — the
+        // fresh one arrives asynchronously and the menu is already on
+        // screen by then.
+        if let latest = MetricsEngine.shared.latest {
+            headerItem.attributedTitle = headerAttributed(latest)
+        }
         // Fresh numbers the instant the user looks; arrives via the normal
         // observer path.
         MetricsEngine.shared.refreshNow()
         islandItem.title = island.isVisible ? "Скрыть островок" : "Показать островок"
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        isMenuOpen = false
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {

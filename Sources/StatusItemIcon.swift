@@ -18,6 +18,40 @@ enum StatusItemIcon {
     static let width: CGFloat = 18
     static let height: CGFloat = 15
 
+    /// Everything that can change a PIXEL of the drawn image.
+    ///
+    /// The image used to be rebuilt every tick, unconditionally, at 1 Hz.
+    /// Measured (probe_ui, 45 s runs, task_thread_times_info): a 1 Hz
+    /// status-item NSImage redraw on its own costs 0.389% of one core —
+    /// twenty times what walking all 441 processes costs. Almost all of
+    /// those redraws produced the identical bitmap, because the bars are
+    /// 13 pt tall and quantise to 13 distinct heights.
+    ///
+    /// So the fill heights are quantised to whole POINTS here, exactly as
+    /// `drawBar` will round them, and two ticks with the same signature
+    /// skip the redraw entirely. The comparison is on what would be DRAWN,
+    /// not on the input fractions — that is what makes it safe.
+    struct Signature: Equatable {
+        let cpuStep: Int
+        let ramStep: Int
+        let pressure: MemoryPressureLevel?
+
+        init(cpu: Double?, ram: Double?, pressure: MemoryPressureLevel?) {
+            self.cpuStep = Signature.step(cpu)
+            self.ramStep = Signature.step(ram)
+            self.pressure = pressure
+        }
+
+        /// -1 for nil (empty track), otherwise the bar height in whole
+        /// points, which is what actually reaches the screen.
+        private static func step(_ fraction: Double?) -> Int {
+            guard let fraction else { return -1 }
+            let clamped = max(0, min(1, fraction))
+            guard clamped > 0 else { return 0 }
+            return Int((max(3, (height - 2) * CGFloat(clamped))).rounded())
+        }
+    }
+
     /// `cpu` and `ram` are 0...1, or nil for "could not measure" (drawn as
     /// an empty track, never as a fake zero fill).
     static func image(cpu: Double?, ram: Double?, pressure: MemoryPressureLevel?) -> NSImage {
