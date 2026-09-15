@@ -81,9 +81,20 @@ final class AppIconCache {
     /// Drop everything that is not in `pids`. Called when the visible row
     /// set changes, so the cache stays the size of the panel rather than
     /// the size of the process table.
+    /// UNCONDITIONALLY, not "only when the cache is bigger than the row
+    /// set". A count comparison is not a subset test: the top-five list
+    /// churns one row for another all the time, which leaves the two counts
+    /// equal while a stale (pid -> NSImage) pair survives — and because
+    /// `IslandModel.rebuildMemorySection` calls this BEFORE it fetches the
+    /// new icons, the cache then oscillates between N and 2N entries and
+    /// never actually drops the app that left. That is the same mistake
+    /// `NetworkSampler` documents removing for the same reason
+    /// (DeviceSamplers.swift, "one interface vanishing while another
+    /// appears in the same tick keeps the counts equal"). Filtering five
+    /// entries costs nothing; getting it wrong contradicts this method's
+    /// own contract.
     func retainOnly(_ pids: Set<pid_t>) {
         precondition(Thread.isMainThread)
-        guard entries.count > pids.count else { return }
         entries = entries.filter { pids.contains($0.key) }
     }
 }
