@@ -3,7 +3,7 @@ import Darwin
 
 /// Lightweight, Sendable identity for a running app, harvested from
 /// NSRunningApplication on the main thread and handed to the sampling queue.
-struct AppIdentity: Sendable {
+struct AppIdentity: Sendable, Equatable {
     let name: String
     let bundleIdentifier: String?
 }

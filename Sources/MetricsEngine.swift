@@ -48,8 +48,19 @@ public final class MetricsEngine {
         static let batteryTicks = 5
         /// Free space barely moves and the query is the most expensive one here.
         static let diskCapacityTicks = 30
-        /// Refresh the pid -> NSRunningApplication name map.
-        static let appIdentityTicks = 2
+        /// SAFETY NET ONLY for the pid -> app-name map. That map is rebuilt
+        /// when NSWorkspace says an app launched or quit, which is the only
+        /// way it can change; this is the floor in case a notification is
+        /// ever missed (fast user switching, a wake that drops one).
+        ///
+        /// It used to be every 2 ticks. Measured with `sample` on the live
+        /// app: `pushAppIdentities` was 63 ms of main-thread CPU in a 20 s
+        /// window — 0.32% of one core, the single largest cost left in the
+        /// app and larger than the whole sampling queue's process walk.
+        /// `NSWorkspace.runningApplications` is a cross-process query and
+        /// it was being asked, thirty times a minute, a question whose
+        /// answer had not changed.
+        static let appIdentityFloorTicks = 60
     }
 
     // MARK: - Main-thread state
@@ -70,6 +81,13 @@ public final class MetricsEngine {
     /// process exits and keeps firing after stop().
     private var thermalObserver: NSObjectProtocol?
     private var powerStateObserver: NSObjectProtocol?
+    /// NSWorkspace launch/terminate observers, held so `stop()` can remove
+    /// them — a dropped token is a subscription that outlives stop().
+    private var appObservers: [NSObjectProtocol] = []
+    /// Last map handed to the sampling queue, so an unchanged one is not
+    /// handed over again.
+    private var lastAppIdentities: [pid_t: AppIdentity] = [:]
+    private var appIdentityRefreshScheduled = false
 
     // MARK: - Sampling-queue state (NEVER touch from main)
 
@@ -109,6 +127,7 @@ public final class MetricsEngine {
         isRunning = true
 
         observeThermalState()
+        observeAppLaunches()
         pushAppIdentities()
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
@@ -146,6 +165,10 @@ public final class MetricsEngine {
             NotificationCenter.default.removeObserver(powerStateObserver)
             self.powerStateObserver = nil
         }
+        for token in appObservers {
+            NSWorkspace.shared.notificationCenter.removeObserver(token)
+        }
+        appObservers.removeAll()
     }
 
     // MARK: - Subscription
@@ -273,7 +296,7 @@ public final class MetricsEngine {
 
         DispatchQueue.main.async { [weak self] in self?.publish(snapshot) }
 
-        if tickCount % Cadence.appIdentityTicks == 0 {
+        if tickCount % Cadence.appIdentityFloorTicks == 0 {
             DispatchQueue.main.async { [weak self] in self?.pushAppIdentities() }
         }
     }
@@ -292,13 +315,50 @@ public final class MetricsEngine {
 
     /// NSWorkspace is a main-thread API, so the pid -> app-name map is built
     /// here and pushed to the sampling queue as an immutable value.
+    ///
+    /// PUSH, NOT POLL. The map can only change when an app launches or
+    /// quits, and NSWorkspace says so; polling it every two seconds cost
+    /// 0.32% of one core to rebuild an identical dictionary (measured with
+    /// `sample` on the live app: 63 ms of main-thread CPU in 20 s, the
+    /// largest single cost in the process). `Cadence.appIdentityFloorTicks`
+    /// is the safety net, not the mechanism.
+    ///
+    /// Also compared before it is handed over: an app quitting changes one
+    /// key, and there is no reason for the sampling queue to take a new
+    /// dictionary when nothing in it differs.
     private func pushAppIdentities() {
+        precondition(Thread.isMainThread)
         var map: [pid_t: AppIdentity] = [:]
+        map.reserveCapacity(lastAppIdentities.count + 8)
         for app in NSWorkspace.shared.runningApplications {
             let name = app.localizedName ?? app.bundleIdentifier ?? "pid \(app.processIdentifier)"
             map[app.processIdentifier] = AppIdentity(name: name, bundleIdentifier: app.bundleIdentifier)
         }
+        guard map != lastAppIdentities else { return }
+        lastAppIdentities = map
         queue.async { [weak self] in self?.processSampler.updateAppIdentities(map) }
+    }
+
+    /// Rebuild the identity map the moment the set of running apps can have
+    /// changed, and never in between. Coalesced onto the next main-queue
+    /// turn: launching an app emits several notifications in a row and
+    /// walking `runningApplications` once per notification would put the
+    /// poll back with extra steps.
+    private func observeAppLaunches() {
+        let wc = NSWorkspace.shared.notificationCenter
+        let schedule = { [weak self] (_: Notification) in
+            guard let self, !self.appIdentityRefreshScheduled else { return }
+            self.appIdentityRefreshScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.appIdentityRefreshScheduled = false
+                self.pushAppIdentities()
+            }
+        }
+        for name in [NSWorkspace.didLaunchApplicationNotification,
+                     NSWorkspace.didTerminateApplicationNotification] {
+            appObservers.append(wc.addObserver(forName: name, object: nil, queue: .main, using: schedule))
+        }
     }
 
     private func observeThermalState() {

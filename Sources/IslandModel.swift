@@ -260,9 +260,14 @@ final class IslandModel: ObservableObject {
         let wasOpen = status == .opened
         status = new
         if new == .opened && !wasOpen {
+            // Refresh BEFORE selecting. `visibleSections` is whatever it
+            // was when the panel last closed, and the strip slot's section
+            // is precisely the one most likely to have come alive since —
+            // selecting against the stale list would bounce the user to
+            // Память on the one open where they least want it.
+            if let snapshot { refreshPanel(snapshot) }
             // Opening navigates to whatever the strip slot was showing.
             selectIfLive(stripSlotSection)
-            if let snapshot { refreshPanel(snapshot) }
         }
     }
 
@@ -277,12 +282,19 @@ final class IslandModel: ObservableObject {
         precondition(Thread.isMainThread)
         guard visibleSections.contains(id), selectedSection != id else { return }
         selectedSection = id
-        if let snapshot { refreshPanel(snapshot) }   // footer drops the new tab
+        // Only the footer depends on which tab is selected; the section
+        // states do not, so a tab click does not rebuild them.
+        refreshFooter()
     }
 
     private func selectIfLive(_ id: IslandSectionID) {
         let target = visibleSections.contains(id) ? id : .memory
-        if selectedSection != target { selectedSection = target }
+        guard selectedSection != target else { return }
+        selectedSection = target
+        // The footer lists the live sections that are NOT selected, so it
+        // has to follow every selection change or it shows the tab the
+        // user is already looking at.
+        refreshFooter()
     }
 
     /// Rebuild everything the OPEN panel draws. Never called while shut.
@@ -291,8 +303,7 @@ final class IslandModel: ObservableObject {
 
         // The rail lists only what is live. Memory always is, which is why
         // it is the fallback below and why the rail is never empty.
-        let live = IslandSectionRegistry.sections.filter { $0.hasState(self) }
-        let ids = live.map(\.id)
+        let ids = IslandSectionRegistry.sections.filter { $0.hasState(self) }.map(\.id)
         if visibleSections != ids { visibleSections = ids }
 
         // The selected tab can go quiet under the user (a print finishes
@@ -300,11 +311,15 @@ final class IslandModel: ObservableObject {
         // for a section with nothing in it.
         if !ids.contains(selectedSection) { selectedSection = .memory }
 
-        let summaries = live
-            .filter { $0.id != selectedSection }
+        refreshFooter()
+    }
+
+    private func refreshFooter() {
+        let line = IslandSectionRegistry.sections
+            .filter { $0.id != selectedSection && visibleSections.contains($0.id) }
             .compactMap { $0.footerSummary(self) }
             .filter { !$0.isEmpty }
-        let line = summaries.joined(separator: " · ")
+            .joined(separator: " · ")
         if footerLine != line { footerLine = line }
     }
 
