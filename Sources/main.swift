@@ -21,6 +21,14 @@ if CommandLine.arguments.contains("--printer-probe") {
     PrinterProbe.run(arguments: CommandLine.arguments)
 }
 
+// Replays every payload that is known to have broken the printer parser —
+// starting with the five that killed the shipping binary with SIGTRAP —
+// through the real PrinterFeature.parse. Exits non-zero if any of them
+// stops behaving. See FeatureProbes.swift.
+if CommandLine.arguments.contains("--printer-fuzz") {
+    PrinterFuzz.run()
+}
+
 // Live trace of the mic/camera rail: one line per published change, so a
 // real recording can be started and stopped against it.
 //   ... --privacy-probe 60

@@ -47,9 +47,20 @@ import Foundation
 //                down is a normal state too (its LaunchAgent may simply
 //                be stopped) and must cost nothing at all.
 //
-// The fetch itself is BLOCKING for up to ~11 s — the panel does a 3 s TCP
+// ...and opening the island pulls a reading immediately, but NOT MORE
+// OFTEN THAN ONCE EVERY 3 s. The island opens on a 0.30 s hover dwell, so
+// without that floor a pointer that crosses the notch on its way to the
+// menu bar costs the user's panel a LAN probe every time — which is the
+// very cost the 300 s discovery cadence was chosen to avoid.
+//
+// The fetch itself is BLOCKING for up to ~12 s — the panel does a 3 s TCP
 // probe plus an 8 s MQTT wait on its own request thread — so it runs on a
-// utility queue, never overlaps itself, and publishes on main.
+// utility queue of its own, never overlaps itself, and publishes on main.
+// SCHEDULING does not run on that queue: a timer queued behind a hung
+// fetch would fire late by however long the peer misbehaves, so the timer
+// lives on main and only the blocking call is handed to the queue. Nothing
+// the printer does can reach `com.local.macpulse.metrics`; the two never
+// share a queue, a lock or a thread.
 // =====================================================================
 
 /// One reading, already clamped and bounded. Everything is Optional;
@@ -185,20 +196,64 @@ enum PrinterFeature {
 
     /// Accepts a JSON number OR a numeric string (the panel's `_int` can
     /// hand back either depending on what the printer sent), rejects
-    /// anything outside a sane range, and never traps on overflow.
+    /// anything outside a sane range, and NEVER TRAPS.
+    ///
+    /// READ THIS BEFORE EDITING — it was got wrong once and it killed the
+    /// whole app. `Int(_: Double)` is a TRAPPING conversion. It traps on
+    /// NaN, on ±infinity, AND on every finite Double outside
+    /// Int.min...Int.max, so an `isFinite` guard in front of it is not a
+    /// bound: `{"percent": 1e300}` is finite and still SIGTRAPs. It is
+    /// reachable: JSONSerialization hands a JSON number back as an
+    /// NSCFNumber whose `as? Int` bridge fails for an inexact value while
+    /// `as? Double` succeeds, so every out-of-range number arrives here as
+    /// a Double. The reviewer crashed the shipping binary with exactly
+    /// that, through this app's own --printer-parse.
+    ///
+    /// `Int(exactly:)` is the failable form and is the only conversion
+    /// allowed on this path. A value that cannot be represented becomes
+    /// nil — "the panel did not tell us", which renders as a dash. Never a
+    /// clamped lie: clamping 1e300 to 100% would draw a full ring for a
+    /// number the printer never sent.
+    ///
+    /// `--printer-fuzz` replays the five payloads that crashed it, plus
+    /// NaN, ±inf, Int64 overflow and a 4 KB numeric string, through this
+    /// function on every run. Keep it that way.
     private static func int(_ any: Any?, min lo: Int, max hi: Int) -> Int? {
         var v: Int?
-        if let n = any as? Int { v = n }
-        else if let d = any as? Double { v = d.isFinite ? Int(d.rounded()) : nil }
-        else if let s = any as? String { v = Int(s.prefix(12)) }
+        if let n = any as? Int {
+            v = n
+        } else if let d = any as? Double {
+            // NaN, ±inf and anything outside Int's range all come back nil.
+            // `.rounded()` first so 99.5 -> 100 rather than 99; rounding a
+            // non-finite Double is itself well defined and still non-finite.
+            v = Int(exactly: d.rounded())
+        } else if let s = any as? String {
+            // Bound the LENGTH, do not truncate the VALUE: `Int(s.prefix(12))`
+            // turned "1000000000000" into 100000000000, i.e. it silently
+            // changed the number rather than rejecting it. Anything longer
+            // than this is not a number we are willing to believe, and
+            // Int(String) is failable so overflow is nil, not a trap.
+            let t = s.trimmingCharacters(in: .whitespaces)
+            v = t.count <= 20 ? Int(t) : nil
+        }
         guard let v, v >= lo, v <= hi else { return nil }
         return v
     }
 
+    /// Bound the length and strip everything that could disturb a single
+    /// line of SwiftUI text. Control characters are dropped, not escaped:
+    /// this string is drawn, never interpreted.
     private static func string(_ any: Any?, max: Int) -> String? {
         guard let s = any as? String else { return nil }
-        let clean = s.prefix(max).filter { !$0.isNewline && $0 != "\r" && $0 != "\t" }
-        return clean.isEmpty ? nil : String(clean)
+        // prefix() FIRST, so a megabyte-long value costs one bounded copy.
+        let clean = s.prefix(max).filter {
+            guard let u = $0.unicodeScalars.first, $0.unicodeScalars.count == 1 else { return true }
+            // C0/C1 controls, plus U+2028/U+2029 which lay out as line breaks.
+            return !(u.value < 0x20 || (u.value >= 0x7F && u.value <= 0x9F)
+                     || u.value == 0x2028 || u.value == 0x2029)
+        }
+        let trimmed = clean.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     // MARK: - Formatting
@@ -257,6 +312,23 @@ final class PrinterPoller {
     /// rule: never do discovery work in didFinishLaunching.
     private let launchDelay: TimeInterval = 15
 
+    /// FLOOR ON THE OPEN-TRIGGERED FETCH. Opening the island used to call
+    /// `schedule(after: 0)` unconditionally, and the island opens on a
+    /// 0.30 s hover dwell — so cycling the pointer past the notch a few
+    /// dozen times an hour produced an order of magnitude more loopback
+    /// fetches than the 300 s discovery poll, and every one of those costs
+    /// the user's own panel a 3 s TCP probe of a printer that is usually
+    /// switched off. That is the exact cost the 300 s cadence was chosen to
+    /// avoid, so the open path gets a floor too. Three seconds still means
+    /// "opening the island answers immediately" for any human who opens it
+    /// on purpose; it only suppresses the drive-by.
+    private let minOpenFetchInterval: TimeInterval = 3
+    /// Monotonic, so a clock change cannot unlock the floor.
+    private var lastFetchStartedAt: UInt64?
+
+    /// The blocking fetch runs here and NOWHERE else. Scheduling does not:
+    /// a fetch can occupy this queue for the full read budget, and a timer
+    /// queued behind it would fire late by however long the panel hangs.
     private let queue = DispatchQueue(label: "com.local.macpulse.pult", qos: .utility)
 
     private weak var model: IslandModel?
@@ -300,7 +372,11 @@ final class PrinterPoller {
         panelOpen = open
         guard running else { return }
         if open {
-            schedule(after: 0)
+            // "At once" means at once, but not more often than the floor —
+            // see `minOpenFetchInterval`. `inFlight` only prevents OVERLAP,
+            // which on a 3 s panel means roughly one fetch per open.
+            let since = lastFetchStartedAt.map { Mono.seconds(since: $0) } ?? .infinity
+            schedule(after: max(0, minOpenFetchInterval - since))
         } else {
             schedule(after: currentInterval())
         }
@@ -312,18 +388,21 @@ final class PrinterPoller {
         return idleInterval
     }
 
+    /// MAIN QUEUE, deliberately. `running`, `generation` and `inFlight` are
+    /// main-thread state, and — more importantly — the timer must not be
+    /// queued behind a blocking fetch on the utility queue. A panel that
+    /// hangs for the full read budget would otherwise delay every
+    /// subsequent schedule by that much, and a poller whose cadence is set
+    /// by how badly the peer is behaving is not a cadence.
     private func schedule(after delay: TimeInterval) {
+        precondition(Thread.isMainThread)
         generation &+= 1
         let g = generation
-        queue.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self else { return }
-            // `running` and `generation` are main-thread state; read them
-            // there and only there.
-            DispatchQueue.main.async {
-                guard self.running, g == self.generation, !self.inFlight else { return }
-                self.inFlight = true
-                self.queue.async { self.fetch() }
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, delay)) { [weak self] in
+            guard let self, self.running, g == self.generation, !self.inFlight else { return }
+            self.inFlight = true
+            self.lastFetchStartedAt = Mono.now()
+            self.queue.async { self.fetch() }
         }
     }
 

@@ -431,7 +431,13 @@ public enum Fmt {
     }
 
     public static func duration(_ v: TimeInterval?) -> String {
-        guard let v, v > 0 else { return "—" }
+        // `.isFinite` and a ceiling as well as `> 0`: `Int(_: Double)` is a
+        // TRAPPING conversion — on NaN, on infinity, and on any finite
+        // value past Int.max — and a "time remaining" derived from a rate
+        // that is almost zero is exactly how you get one of those. Same
+        // class of bug as FeaturePrinter's; the answer is the same too, a
+        // dash rather than a crash.
+        guard let v, v.isFinite, v > 0, v < 1e12 else { return "—" }
         let m = Int(v / 60)
         return m >= 60 ? String(format: "%dh%02dm", m / 60, m % 60) : "\(m)m"
     }

@@ -175,7 +175,11 @@ final class DiskSampler {
         ]
         guard let values = try? url.resourceValues(forKeys: keys) else { return }
         cachedCapacity = (
-            values.volumeTotalCapacity.map { UInt64($0) },
+            // max(0,) like its two siblings below. `UInt64(_: Int)` TRAPS on
+            // a negative, and every one of these numbers comes from outside
+            // this process; the siblings were already guarded and this one
+            // was not, for no reason anybody wrote down.
+            values.volumeTotalCapacity.map { UInt64(max(0, $0)) },
             values.volumeAvailableCapacityForImportantUsage.map { UInt64(max(0, $0)) },
             values.volumeAvailableCapacityForOpportunisticUsage.map { UInt64(max(0, $0)) },
             values.volumeName
