@@ -7,7 +7,7 @@
 	<key>CFBundleExecutable</key>
 	<string>MacPulse</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.local.macpulse</string>
+	<string>io.github.borissharikoff-droid.MacPulse</string>
 	<key>CFBundleName</key>
 	<string>MacPulse</string>
 	<key>CFBundlePackageType</key>
@@ -16,16 +16,20 @@
 	<string>1.0.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>LSUIElement</key>
-	<true/>
-	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>MacPulse показывает время до следующей встречи в островке.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>MacPulse показывает время до следующей встречи в островке.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026 borissharikoff-droid · MIT License</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

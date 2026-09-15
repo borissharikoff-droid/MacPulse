@@ -1,4 +1,18 @@
+# Build output — the whole directory is disposable and is rebuilt by ./build.sh.
 Build/
-.DS_Store
+
+# Release artifacts, wherever they land.
+*.dmg
+*.zip
+
+# Signing material. NEVER commit a private key or a cert request.
+*.p12
+*.pem
+*.cer
+codesign.cnf
+
+# Intermediates
 *.o
 *.swiftmodule
+
+.DS_Store
