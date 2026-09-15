@@ -214,8 +214,43 @@ struct SmallButton: View {
 private struct MemorySectionView: View {
     @ObservedObject var model: IslandModel
 
+    // THE VERTICAL BUDGET, spelled out so the next change to it has to
+    // face the arithmetic. 186 either way; what moves is the app rows.
+    //
+    //   QUIET — which is almost always        WITH THE PRESSURE FOLD
+    //    39  hero                              39  hero
+    //     6  gap                                6  gap
+    //     1  divider                            1  divider
+    //     6  gap                                6  gap
+    //    11  coverage note                     11  coverage note
+    //     3  gap                                3  gap
+    //   118  FIVE app rows (5x22 + 4x2)        70  THREE app rows (3x22 + 2x2)
+    //     2  slack                              5  gap
+    //                                          45  PressureFold
+    //   ---                                   ---
+    //   186                                   186
+    //
+    // The fold is on screen only while `!pressureAlert.isQuiet`, which is
+    // the exact condition that used to decide whether «Давление» had a
+    // chip in the rail. On a quiet machine this section is pixel-identical
+    // to what it was before the fold existed. See IslandPressureFold.swift
+    // for why the fourth and fifth app row are the right thing to spend.
+    private static let foldGap: CGFloat = 5
+
+    /// How many app rows there is room for. Derived rather than written
+    /// down twice: the model publishes up to five and this decides how
+    /// many of them are drawn.
+    private static func appRows(withFold: Bool) -> Int { withFold ? 3 : 5 }
+
     var body: some View {
         let state = model.memorySection
+        // ONE read, used twice — for whether to draw the fold and for how
+        // many app rows there is room for. Reading it twice in two places
+        // is how those go out of step and the section silently overflows
+        // its 186 pt, which `IslandRouter` would then clip.
+        let showsFold = !model.pressureAlert.isQuiet
+        let rows = Array(state.rows.prefix(Self.appRows(withFold: showsFold)))
+
         VStack(alignment: .leading, spacing: 0) {
             MemoryHero(state: state)
 
@@ -232,12 +267,12 @@ private struct MemorySectionView: View {
 
             Spacer(minLength: 0).frame(height: 3)
 
-            if state.rows.isEmpty {
+            if rows.isEmpty {
                 Text("—").font(.system(size: 11)).foregroundStyle(Color(white: 0.4))
                     .padding(.horizontal, 6)
             }
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(state.rows) { row in
+                ForEach(rows) { row in
                     AppRow(row: row,
                            phase: model.quitPhase(for: row.pid),
                            onQuit: { model.requestQuit(pid: row.pid) },
@@ -246,6 +281,15 @@ private struct MemorySectionView: View {
             }
 
             Spacer(minLength: 0)
+
+            // «Давление» USED TO BE ITS OWN TAB and is now the bottom of
+            // this one, because the two were always the same subject.
+            // Drawn only while the notifier has something to say.
+            if showsFold {
+                Spacer(minLength: 0).frame(height: Self.foldGap)
+                PressureFold(state: model.pressureAlert)
+                    .padding(.horizontal, 6)
+            }
         }
         .frame(width: IslandMetrics.panelWidth - IslandRouter.gutter * 2,
                height: IslandMetrics.bodyHeight,

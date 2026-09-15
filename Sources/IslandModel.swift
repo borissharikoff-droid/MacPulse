@@ -241,10 +241,10 @@ final class IslandModel: ObservableObject {
     /// while the panel is open. See FeaturePressureAlert.swift.
     @Published private(set) var pressureAlert = PressureAlertState()
 
-    /// Clipboard history, already formatted. Written ONLY when the
-    /// clipboard actually moves — never on a tick. See
-    /// IslandSectionClipboard.swift.
-    @Published private(set) var clipboard = ClipboardSectionState()
+    /// Clipboard history, already formatted, for the shelf along the
+    /// bottom of the panel. Written ONLY when the clipboard actually moves
+    /// — never on a tick. See IslandShelf.swift.
+    @Published private(set) var clipboard = ClipboardShelfState()
 
     private let iconCache = AppIconCache()
     private var token: MetricsObserverToken?
@@ -280,7 +280,7 @@ final class IslandModel: ObservableObject {
 
         // Event-driven, not tick-driven: the engine publishes only on a
         // real `changeCount` transition, so on an idle machine this never
-        // calls back at all. See IslandSectionClipboard.swift.
+        // calls back at all. See IslandShelf.swift.
         ClipboardFeature.shared.start(model: self)
 
         // NEVER PROMPTS. Starts only if the user turned the feature on in
@@ -514,17 +514,17 @@ final class IslandModel: ObservableObject {
     /// publishes only on a real `changeCount` transition, so on an idle
     /// machine this is never called at all.
     ///
-    /// Deliberately does NOT touch the wings. Clipboard history never
-    /// earns a collapsed-strip slot — it has no state worth a pixel in a
-    /// 77 pt wing — so there is no `requestTrailingWing` here and
-    /// `stripSlotSection` is never `.clipboard`.
-    func setClipboard(_ state: ClipboardSectionState) {
+    /// NO `refreshRouter()` AND NO `updateTrailingSlot()`. The clipboard is
+    /// not a section any more — it is the shelf along the bottom of the
+    /// panel, which is on screen whichever tab is selected — so there is no
+    /// chip for the rail to gain or lose, and it never earned a
+    /// collapsed-strip slot in the first place ("there are 12 things in
+    /// your clipboard" is not something anyone acts on from the menu bar).
+    /// This write exists only to redraw the shelf.
+    func setClipboard(_ state: ClipboardShelfState) {
         precondition(Thread.isMainThread)
         guard clipboard != state else { return }
         clipboard = state
-        // The rail gains its chip with a copy and loses it again when the
-        // copy goes stale — see `ClipboardSectionState.isLive`.
-        if status == .opened { refreshRouter() }
     }
 
     /// Called by `CalendarEngine`'s observer on the main thread. The
@@ -560,10 +560,11 @@ final class IslandModel: ObservableObject {
     /// Called by `PrivacyWatcher` on the main thread when a sensor starts
     /// or stops.
     ///
-    /// Deliberately does NOT touch the wings. The privacy rail is sized to
-    /// fit inside the RESTING 26 pt wing precisely so that the one signal
-    /// nothing may preempt can never be starved by a width negotiation it
-    /// might lose. See IslandMetrics.privacyRailWidth.
+    /// Deliberately does NOT touch the wings, and there is nothing in the
+    /// wings for it to touch: the two privacy dots were deleted from the
+    /// collapsed strip because macOS draws that indicator itself. What is
+    /// left is the footer clause naming the app, which is the part the
+    /// system does not provide. See IslandPrivacyLine.swift.
     func setPrivacy(_ state: PrivacyState) {
         precondition(Thread.isMainThread)
         guard privacy != state else { return }
@@ -606,9 +607,14 @@ final class IslandModel: ObservableObject {
     /// worse than saying it once) and the clipboard (a history has no
     /// instant worth an ambient pixel).
     ///
-    /// The privacy rail is NOT in this list either. It is pinned at the far
-    /// right of the wing and is drawn beside whatever wins here, never
-    /// instead of it.
+    /// THE PRIVACY RAIL IS NOT IN THIS LIST EITHER, AND NO LONGER IN THE
+    /// WING AT ALL. It used to be pinned at the far right, drawn beside
+    /// whatever won here rather than instead of it. It was deleted on
+    /// exactly the argument in the paragraph above: macOS already shows an
+    /// orange microphone dot in its own menu bar a few points away, so ours
+    /// was the second saying of the same thing. The rule that kept the
+    /// pressure notifier out of the wing applies to anything the system
+    /// already draws.
     ///
     /// IF YOU REORDER THESE BRANCHES, REORDER `IslandTrailingWing` TO
     /// MATCH. This method picks which tab the click navigates to; the wing

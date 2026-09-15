@@ -32,24 +32,30 @@ enum IslandFeatures {
         // RAIL ORDER, AND WHY IT IS THIS ORDER.
         //
         // Память is leftmost and is registered by the registry itself.
-        // Давление comes next because it is Память's own subject — the two
-        // memory tabs sit together, and a rail that scattered them would
-        // read as seven unrelated features rather than one app.
+        // Then the four that compete for the collapsed strip's single slot,
+        // in exactly the priority `IslandModel.updateTrailingSlot` uses:
+        // Печать, Встреча, Звук, Туннель. One ordering to learn, not two —
+        // the chip a user reaches for first is the thing the strip would
+        // have shown them.
         //
-        // Then the four that compete for the collapsed strip's single
-        // slot, in exactly the priority `IslandModel.updateTrailingSlot`
-        // uses: Печать, Встреча, Звук, Туннель. One ordering to learn, not
-        // two — the chip a user reaches for first is the thing the strip
-        // would have shown them.
+        // TWO SECTIONS THAT USED TO BE REGISTERED HERE ARE NOT ANY MORE,
+        // and neither of them lost its feature:
         //
-        // Буфер last: a history is the least urgent thing in the panel and
-        // it is the only section here that is never a live condition.
-
-        // The memory-pressure notifier. Mostly not a section at all: its
-        // chip is absent unless it has actually warned the user in the
-        // last 24 h, or the user has switched it off — see
-        // IslandSectionPressure.swift.
-        IslandSectionRegistry.register(.pressure)
+        //   Давление  folded into Память. The user: "смысл между давлением
+        //             и памятью — это как будто одни и те же вкладки, нахуя
+        //             их разъединять". Two chips for one subject made him
+        //             navigate between two halves of the same answer. The
+        //             notifier still runs, still warns, still has its mute
+        //             switch — at the bottom of Память, and only while it
+        //             has something to say. See IslandPressureFold.swift.
+        //
+        //   Буфер     became the SHELF along the bottom of the panel, on
+        //             screen whichever section is selected, with every
+        //             entry draggable into another app. A tab is a place
+        //             you navigate to, which is one gesture too many for a
+        //             thing you reach for. See IslandShelf.swift.
+        //
+        // So the rail is five sections where it was seven.
 
         // Bambu P1S, read from the user's own loopback panel. Its chip is
         // absent unless a print is actually running — see
@@ -72,18 +78,16 @@ enum IslandFeatures {
         // IslandSectionTunnel.swift.
         IslandSectionRegistry.register(.tunnel)
 
-        // Clipboard history, in memory only. Its chip is absent until
-        // something has been copied RECENTLY, goes away again when that
-        // copy goes stale, and it NEVER takes the collapsed strip's slot
-        // — see IslandSectionClipboard.swift.
-        IslandSectionRegistry.register(.clipboard)
-
-        // IslandSectionRegistry.register(.shelf)
-
-        // NOT A SECTION, ON PURPOSE: the mic/camera privacy rail. It is a
-        // dot in the trailing wing plus a line in the panel footer, and it
-        // gets no tab — a tab is something you navigate TO, and a safety
-        // signal has to be legible without navigating anywhere. See
-        // IslandPrivacyRail.swift.
+        // NOT A SECTION, ON PURPOSE: the mic/camera privacy readout. It is
+        // one clause in the panel footer and nothing else. It gets no tab
+        // because a tab is something you navigate TO, and it no longer gets
+        // a dot in the collapsed wing either, because macOS draws that
+        // indicator in its own menu bar a few points away. What we say is
+        // the part the system leaves out: WHICH app. See
+        // IslandPrivacyLine.swift.
+        //
+        // ALSO NOT A SECTION: the clipboard shelf. `IslandRouter` draws it
+        // below the body, outside the registry entirely — see
+        // IslandShelf.swift for why that exception exists.
     }
 }

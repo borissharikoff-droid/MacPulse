@@ -66,12 +66,31 @@ if CommandLine.arguments.contains("--clipboard-probe") {
     ClipboardProbe.run()
 }
 
+// Rasterises the REAL IslandView offscreen and counts what is in it: how
+// many coloured dots the collapsed strip lights (the answer must be ONE),
+// what the shelf holds, and whether the panel's rows end exactly at the
+// bottom of the plate. NOT a screenshot — it needs no screen at all, which
+// is the point: a locked screen hands `screencapture` a frame of pure
+// black with a zero exit status. See IslandRenderProbe.swift.
+//   ... --render-probe [output-directory]
+if CommandLine.arguments.contains("--render-probe") {
+    IslandRenderProbe.run(arguments: CommandLine.arguments)
+}
+
 // Rail discipline: start the real IslandModel, let every feature source
 // settle, and print which sections report hasState == true. A quiet machine
 // should show ONE chip. See RailProbe.swift.
 //   ... --rail-probe [20]
 if CommandLine.arguments.contains("--rail-probe") {
     RailProbe.run(arguments: CommandLine.arguments)
+}
+
+// The self-updater's own check: version-comparison and host allow-list
+// tables, the REAL validator run against a zip you built by hand, or one
+// real GitHub round trip that installs nothing. See UpdateProbe.swift.
+//   ... --update-probe [validate <zip> | check]
+if CommandLine.arguments.contains("--update-probe") {
+    UpdateProbe.run(arguments: CommandLine.arguments)
 }
 
 let app = NSApplication.shared

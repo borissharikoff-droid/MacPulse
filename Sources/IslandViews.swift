@@ -42,12 +42,12 @@ enum IslandPalette {
     /// Used for "could not measure". Never for a measured zero.
     static let unknown = Color(white: 0.45)
 
-    /// The privacy rail deliberately borrows the SYSTEM's own indicator
-    /// colours — orange for the microphone, green for the camera — so the
-    /// user does not have to learn a second vocabulary for a fact macOS
-    /// already tells them in the menu bar.
-    static let micInUse = Color(red: 1.00, green: 0.58, blue: 0.00)
-    static let cameraInUse = Color(red: 0.22, green: 0.80, blue: 0.35)
+    // NO micInUse / cameraInUse HERE ANY MORE. They existed for the two
+    // dots in the collapsed trailing wing, and they were the system's own
+    // orange and green precisely because they were restating the system's
+    // own indicator. That was the argument for deleting the dots; see
+    // IslandPrivacyLine.swift. The footer clause that replaced them is
+    // plain text at the footer's own colour and borrows nothing.
 
     /// The print ring when the panel could not tell us a filament colour.
     static let printing = Color(red: 0.36, green: 0.72, blue: 1.00)

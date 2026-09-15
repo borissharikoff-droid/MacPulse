@@ -21,15 +21,27 @@ import SwiftUI
 // from the widest row the wing can draw, never from where some other
 // app's menu bar extra was once measured to be.
 //
-// WHAT IS IN THE TRAILING WING NOW. Two things, and they are not equals:
+// WHAT IS IN THE TRAILING WING NOW. One thing: the live slot the arbiter
+// in `IslandModel.updateTrailingSlot` picked — print progress, or the
+// meeting countdown.
 //
-//   * the PRIVACY RAIL, pinned at the far right, which nothing may
-//     preempt and which is sized to fit inside the resting 26 pt so it
-//     never has to ask for width at all;
-//   * ONE live slot to its left, whatever `IslandModel`'s arbiter picked
-//     — print progress this phase — which gets whatever is left.
+// THE PRIVACY RAIL IS NOT HERE ANY MORE. It was two 6 pt dots pinned at
+// the far right, and it is gone because macOS already draws an orange
+// microphone indicator in its own menu bar, a few points to the right of
+// where ours sat. Ours restated it. That is the same argument written
+// beside `IslandModel.updateTrailingSlot` for keeping the pressure
+// notifier out of the wing, applied consistently.
 //
-// The arithmetic for "whatever is left" is in
+// The part macOS does NOT provide — WHICH app is holding the microphone —
+// is still said, in words, in the panel footer. `PrivacyWatcher` runs and
+// publishes exactly as before; only the 6 pt dot left. See
+// IslandPrivacyLine.swift.
+//
+// SO THE COLLAPSED ISLAND LIGHTS EXACTLY ONE AMBER DOT, in the leading
+// wing, and it is the kernel's memory-pressure verdict. Before adding a
+// second, check whether the system already draws it.
+//
+// The arithmetic for how the wing is spent is in
 // `IslandMetrics.trailingLayout` and nowhere else, for the same reason
 // `collapsedPlate` is: two copies of a layout rule is how the drawn thing
 // and the hit-tested thing drift apart.
@@ -66,10 +78,10 @@ struct IslandLeadingWing: View {
     }
 }
 
-/// RIGHT of the camera housing: the privacy rail, and one live slot.
+/// RIGHT of the camera housing: one live slot, and nothing else.
 ///
-/// Empty at rest, which is most of the time — no sensor in use and no
-/// print means both are absent and the wing is back at 26 pt.
+/// Empty at rest, which is most of the time — no print and no imminent
+/// meeting means the slot is absent and the wing is back at 26 pt.
 ///
 /// WHEN YOU ADD A FEATURE TO THE SLOT: the width is not yours to choose
 /// from in here. The arbiter in `IslandModel.updateTrailingSlot` decides
@@ -96,7 +108,6 @@ struct IslandTrailingWing: View {
         // beside `IslandModel.updateTrailingSlot`, which is where the
         // reasoning lives.
         IslandMetrics.trailingLayout(wing: availableWidth,
-                                     privacyVisible: !model.privacy.isQuiet,
                                      slotVisible: model.printer != nil
                                                   || model.calendarStrip != nil)
     }
@@ -110,8 +121,9 @@ struct IslandTrailingWing: View {
             // the `slotWidth > 0` test, so with no print and the mic dot up
             // the row's rigid minimum was 7 + 23 = 30 pt inside a 26 pt
             // wing: the flexible Spacer below collapsed to nothing and the
-            // privacy rail was pushed 4 pt off the plate. `l.leadingGap` is
-            // 0 when there is no slot to lead in to, and
+            // privacy rail was pushed 4 pt off the plate. The rail has
+            // since left the wing entirely, but the rule it taught stands:
+            // `l.leadingGap` is 0 when there is no slot to lead in to, and
             // `IslandMetrics.trailingLayout` is the only place that decides
             // it — which is also what `--wing-probe` now checks.
             if l.leadingGap > 0 {
@@ -140,13 +152,6 @@ struct IslandTrailingWing: View {
             }
 
             Spacer(minLength: 0)
-
-            // LAST, AND ALWAYS. Drawn after the Spacer so it is pinned to
-            // the far right whatever else is in the wing.
-            if l.railWidth > 0 {
-                IslandPrivacyRail(state: model.privacy)
-                    .frame(width: l.railWidth, alignment: .trailing)
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }

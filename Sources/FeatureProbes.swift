@@ -114,12 +114,10 @@ enum PrinterProbe {
               + "(a probe process has no status item, so nothing has proved there is "
               + "room and the wing refuses to grow past the resting width)")
         let layout = IslandMetrics.trailingLayout(wing: IslandMetrics.maxTrailingWingWidth,
-                                                  privacyVisible: true,
                                                   slotVisible: true)
-        print("at the \(IslandMetrics.maxTrailingWingWidth) pt ceiling, "
-              + "with both privacy dots up (the worst case):")
+        print("at the \(IslandMetrics.maxTrailingWingWidth) pt ceiling (the widest row):")
         print("   lead-in \(layout.leadingGap) pt, slot \(layout.slotWidth) pt, "
-              + "time text \(layout.showsSlotText), rail \(layout.railWidth) pt, "
+              + "time text \(layout.showsSlotText), "
               + "spent \(layout.spent) / \(IslandMetrics.maxTrailingWingWidth) pt")
         exit(0)
     }

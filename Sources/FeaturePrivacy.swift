@@ -4,16 +4,20 @@ import CoreMediaIO
 import Darwin
 
 // =====================================================================
-// THE PRIVACY RAIL'S DATA SOURCE: who is holding the microphone, and is
-// the camera on.
+// THE PRIVACY READOUT'S DATA SOURCE: who is holding the microphone, and
+// is the camera on.
 //
-// No SwiftUI in this file. `IslandPrivacyRail.swift` draws it.
+// No SwiftUI in this file. `IslandPrivacyLine.swift` turns it into the one
+// clause the panel footer shows. It USED to feed two dots in the collapsed
+// island's trailing wing as well; those are gone, because macOS draws that
+// indicator itself a few points away. Nothing in THIS file changed when
+// they went — the watcher still runs and still publishes.
 //
-// WHY THIS IS THE ONE FEATURE THAT CANNOT BE PREEMPTED. Everything else
-// on the island is a convenience. This one answers "is something
-// listening to me right now", on a machine that runs Zoom, Telegram and a
-// voice recorder that launches at login. A safety signal that yields its
-// pixels to a progress ring is not a safety signal.
+// WHAT THIS FEATURE IS FOR, NOW THE DOT IS GONE. It never really answered
+// "is something listening to me right now" — macOS answers that itself,
+// in its own menu bar, whether or not MacPulse is running. It answers the
+// question the system leaves open: WHICH APP. That answer needs a name and
+// a word, so its home was always the panel and never a 6 pt dot.
 //
 // ---------------------------------------------------------------------
 // MICROPHONE — public API, unprivileged, exact, event-driven.
@@ -48,9 +52,9 @@ import Darwin
 // still a stream-lifetime signal. An app that keeps the input device open
 // while muted will light this dot. That is the SAFE direction to be wrong
 // in — a false "something has the mic" costs a glance; a false "nothing
-// has the mic" is the failure that matters — but the tooltip says
-// "держит микрофон" (holds the microphone), never "записывает" (is
-// recording), and it must keep saying that.
+// has the mic" is the failure that matters — but the footer clause says
+// "Микрофон: <app>" (who holds it), never "записывает" (is recording),
+// and it must keep saying that.
 //
 // ---------------------------------------------------------------------
 // CAMERA — detection only, per device, and NOT attributed to an app.

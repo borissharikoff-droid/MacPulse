@@ -5,24 +5,35 @@ import SwiftUI
 //
 //    32  notch strip   (click = pin; drawn by IslandView, not here)
 //     6  gap
-//    28  RAIL          one chip per section that HAS STATE RIGHT NOW
+//    24  RAIL          one chip per section that HAS STATE RIGHT NOW
 //     6  gap
 //   186  BODY          exactly ONE section, 560 x 186
 //     4  gap
-//    18  FOOTER        one line for the other live sections
+//    28  SHELF         the last clipboard entries, draggable, ALWAYS
+//     4  gap
+//    14  FOOTER        one line for the other live sections
 //   ---
-//   280, and it stays 280.
+//   304
 //
 // WHY A ROUTER AND NOT A DASHBOARD. Every feature that lands wants a
 // strip of the panel, and a panel that grows a strip per feature is the
 // wall of numbers the user has already rejected twice. A router costs one
-// 28 pt rail once, and then every feature after the first is free. It
-// also degrades correctly: with one live section the rail is a single
-// chip and the panel is what it has always been.
+// rail once, and then every feature after the first is free. It also
+// degrades correctly: with one live section the rail is a single chip and
+// the panel is what it has always been.
 //
-// This file contains NO knowledge of any particular section. It asks the
-// registry what is live and renders it. Adding a section means touching
-// IslandFeatures.swift and your own file — never this one.
+// THE SHELF IS THE ONE THING IN HERE THAT IS NOT ROUTED TO, and that is
+// the point of it: the user asked to see his last few clipboard entries
+// along the bottom and drag them out, and a tab is a place you navigate
+// to, which is one gesture too many for a thing you reach for. So it sits
+// below the body, on screen whichever section is selected, and «Буфер» is
+// no longer a section at all. It is the ONLY exception to the rule below
+// — see IslandShelf.swift for why it earned one, and IslandMetrics for
+// where its 28 pt came from.
+//
+// Otherwise this file contains NO knowledge of any particular section. It
+// asks the registry what is live and renders it. Adding a section means
+// touching IslandFeatures.swift and your own file — never this one.
 // =====================================================================
 
 // MARK: - Rail
@@ -81,16 +92,19 @@ struct IslandRail: View {
     /// where the tab exists, is listed, and cannot be clicked.
     ///
     /// With one section that could never happen and this was a constant 9.
-    /// With seven it can: measured by `--rail-probe` at the selected
-    /// chip's semibold weight, all seven titles plus their symbols come to
-    /// 545.4 pt at 9 pt padding — 13.4 pt over. At 6 pt they come to
-    /// 503.4 and fit with 28.6 to spare.
+    /// With seven it could: measured by `--rail-probe` at the selected
+    /// chip's semibold weight, all seven titles plus their symbols came to
+    /// 545.4 pt at 9 pt padding — 13.4 pt over. At 6 pt they came to 503.4
+    /// and fit with 28.6 to spare.
     ///
-    /// So the padding tightens at six chips and not before. Five or fewer
-    /// — every case anyone will actually see — is pixel-identical to what
-    /// the rail has always drawn. `--rail-probe` recomputes this against
-    /// the live registry on every run, so a section added later that does
-    /// not fit says so in a number rather than on screen.
+    /// THERE ARE FIVE SECTIONS NOW, not seven: «Давление» folded into
+    /// «Память» and «Буфер» became the shelf. So the six-chip case is
+    /// unreachable until somebody registers two more, and the tightening
+    /// below is dead code that is deliberately kept — it is the thing that
+    /// stops the sixth section from being the one that discovers this.
+    /// `--rail-probe` recomputes it against the live registry on every
+    /// run, so a section added later that does not fit says so in a number
+    /// rather than on screen.
     static func chipPadding(chips: Int) -> CGFloat { chips >= 6 ? 6 : 9 }
 
     var body: some View {
@@ -126,9 +140,10 @@ struct IslandRail: View {
 
 // MARK: - Footer
 
-/// One line for the live sections that are NOT on screen. Empty on a
-/// quiet machine, and it keeps its 18 pt anyway so that a section
-/// appearing or disappearing never moves the body.
+/// One line for the live sections that are NOT on screen, plus whichever
+/// app is holding the microphone. Empty on a quiet machine, and it keeps
+/// its 14 pt anyway so that a section appearing or disappearing never
+/// moves the body or the shelf.
 struct IslandFooter: View {
     @ObservedObject var model: IslandModel
 
@@ -183,6 +198,12 @@ struct IslandRouter: View {
                    height: IslandMetrics.bodyHeight,
                    alignment: .top)
             .clipped()
+
+            Spacer(minLength: 0).frame(height: IslandMetrics.shelfGap)
+
+            // NOT a section, and not selected: it is below the router, not
+            // inside it. See IslandShelf.swift.
+            ClipboardShelf(model: model)
 
             Spacer(minLength: 0).frame(height: IslandMetrics.footerGap)
 

@@ -970,6 +970,76 @@ final class ClipboardEngine {
         return written
     }
 
+    /// What ONE shelf chip offers to a drag, as pasteboard writers.
+    ///
+    /// THIS EXISTS SO THAT `payload` CAN STAY `fileprivate`. The shelf is
+    /// in another file and must never see the bytes; it asks for a writer,
+    /// hands it to `NSDraggingItem`, and AppKit does the rest. Same shape
+    /// as `recopy`, which is the CLICK half of the same affordance —
+    /// deliberately, so that what a drop receives and what a click puts on
+    /// the clipboard cannot drift into two different answers.
+    ///
+    /// RETURNS nil, and offers NOTHING, when the payload was not retained
+    /// (an image, or an item over the per-entry cap) or the entry has left
+    /// history. `canRecopy` is the same bit, so a chip that cannot be
+    /// clicked is also a chip that cannot be dragged, and the shelf draws
+    /// it inert rather than starting a session that would drop nothing.
+    ///
+    /// WHAT EACH KIND WRITES, and why:
+    ///
+    ///   .text       `.string`. Drops into any text field.
+    ///   .url        `public.url` + `.string`. A browser or Figma takes the
+    ///               URL; a plain text field takes the same characters.
+    ///   .richText   `.rtf` + `.string`. The formatting survives into
+    ///               Pages or TextEdit, and a plain field still gets text.
+    ///   .fileURLs   ONE `NSURL` PER FILE, i.e. `public.file-url`. This is
+    ///               the case the shelf exists for: a real file reference
+    ///               is what makes Finder copy it, Telegram attach it and
+    ///               Figma import it, instead of pasting its path as text.
+    ///   .image      nothing. The engine never retains image bytes — see
+    ///               `readCandidate`, where the data is measured inside an
+    ///               autoreleasepool and dropped — so there is no image
+    ///               data to offer and none is invented.
+    ///
+    /// CONCEALED ITEMS CANNOT REACH THIS. An item carrying a secret marker
+    /// never becomes an entry at all: it is refused in `poll()` before its
+    /// bytes are ever requested, so there is no id for the shelf to pass
+    /// in. The property is structural rather than a check repeated here,
+    /// which is the only kind of property worth having.
+    func draggingWriters(id: UInt64) -> [NSPasteboardWriting]? {
+        precondition(Thread.isMainThread,
+                     "ClipboardEngine.draggingWriters must be called from the main thread")
+        lock.lock()
+        guard let idx = store.firstIndex(where: { $0.id == id }) else { lock.unlock(); return nil }
+        let payload = store[idx].payload
+        lock.unlock()
+
+        switch payload {
+        case .notRetained:
+            return nil
+        case .text(let s):
+            return [s as NSString]
+        case .url(let s):
+            let item = NSPasteboardItem()
+            item.setString(s, forType: NSPasteboard.PasteboardType(ClipboardTypes.url))
+            item.setString(s, forType: .string)
+            return [item]
+        case .richText(let rtf, let plain):
+            let item = NSPasteboardItem()
+            item.setData(rtf, forType: .rtf)
+            item.setString(plain, forType: .string)
+            return [item]
+        case .fileURLs(let paths):
+            guard !paths.isEmpty else { return nil }
+            // NSURL, not a string. `NSURL` writes public.file-url, which is
+            // what a receiver reads back with
+            // `readObjects(forClasses: [NSURL.self])`. A path written as a
+            // string drops as the TEXT of the path, which is exactly the
+            // failure this shelf exists to avoid.
+            return paths.map { URL(fileURLWithPath: $0) as NSURL }
+        }
+    }
+
     /// Drop everything. The session counters survive — they are the honest
     /// record of what the engine did, and "3 secrets skipped" is not
     /// something clearing the history should erase.

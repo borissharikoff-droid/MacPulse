@@ -101,7 +101,9 @@ enum RailProbe {
               + " ceiling \(Int(IslandMetrics.maxTrailingWingWidth)))")
         print("  slot section    \(model.stripSlotSection)"
               + "   <- the tab a click on the strip would open")
-        print("  privacy rail    \(model.privacy.isQuiet ? "quiet" : "ON")")
+        // No longer drawn in the wing — macOS draws that indicator itself.
+        // This is what the panel FOOTER would say.
+        print("  privacy footer  \(PrivacyFooter.line(model.privacy) ?? "(quiet)")")
         print("")
 
         print("--- what each feature actually measured -----------------------")
@@ -117,10 +119,21 @@ enum RailProbe {
               + (model.tunnel.map { m in
                      "deservesStripSlot=" + (m.deservesStripSlot.map(String.init) ?? "nil")
                  } ?? "nil (не измерено)"))
-        print("  pressureAlert   "
-              + "history=\(model.pressureAlert.history.count) muted=\(model.pressureAlert.isMuted)")
-        print("  clipboard       "
-              + "entries=\(model.clipboard.entryCount) isLive=\(model.clipboard.isLive)")
+        // Also not a section any more: folded into Память, and drawn only
+        // while `isQuiet` is false. Same condition that used to gate its
+        // chip, so this line still answers the same question.
+        print("  pressure fold   "
+              + "history=\(model.pressureAlert.history.count) "
+              + "muted=\(model.pressureAlert.isMuted) "
+              + "onScreen=\(!model.pressureAlert.isQuiet)")
+        // NOT a section any more, so it is not in the table above: the
+        // clipboard is the shelf along the bottom of the panel. Printed
+        // here because "what each feature measured" is still the question,
+        // and a shelf with nothing on it is worth seeing.
+        print("  clipboard shelf "
+              + "entries=\(model.clipboard.entryCount) "
+              + "chips=\(model.clipboard.items.count)/\(ClipboardShelfState.slots)"
+              + (model.clipboard.isPaused ? " PAUSED" : ""))
         print("")
         print("A quiet machine should show ONE chip. Anything else is either a")
         print("real condition on this machine right now, or a section that broke")

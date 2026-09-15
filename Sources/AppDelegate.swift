@@ -9,9 +9,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     private var cleanupItem: NSMenuItem!
     private var loginItem: NSMenuItem!
     private var calendarItem: NSMenuItem!
+    private var updateItem: NSMenuItem!
 
     private var metricsToken: MetricsObserverToken?
     private var isCleaning = false
+
+    /// The self-updater's ENTIRE user interface is this one menu item's
+    /// title. There is no window, no sheet, no alert and no notification
+    /// anywhere in the update path — see `checkForUpdates(silent:)` for
+    /// why a failed check must be invisible.
+    private var updateTimer: Timer?
+    private var updateResetWork: DispatchWorkItem?
+    private var isUpdating = false
+    private static let restingUpdateTitle = "Проверить обновления…"
 
     /// What the status item currently DRAWS. A tick whose signature is
     /// unchanged does not rebuild the NSImage — see StatusItemIcon.
@@ -53,10 +63,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         metricsToken = MetricsEngine.shared.observe { [weak self] snapshot in
             self?.renderStatusItem(snapshot)
         }
+
+        scheduleUpdateChecks()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         if let metricsToken { MetricsEngine.shared.remove(metricsToken) }
+        updateTimer?.invalidate()
+        updateResetWork?.cancel()
         island.stop()
     }
 
@@ -124,6 +138,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         calendarItem.toolTip = "Читает только время начала ближайшей встречи. "
                              + "Названия встреч никуда не записываются и не отправляются."
         menu.addItem(calendarItem)
+
+        menu.addItem(.separator())
+
+        // The self-updater's whole interface. Its TITLE is the state
+        // display — "Проверяю…", "Скачиваю v1.0.1… 42%", "Обновлений нет
+        // (v1.0.0)" — because a menu item the user has just clicked is
+        // the one place a status line costs nothing and interrupts
+        // nobody. Same shape the sibling project uses.
+        updateItem = NSMenuItem(title: Self.restingUpdateTitle,
+                                action: #selector(checkForUpdatesManually), keyEquivalent: "")
+        updateItem.target = self
+        updateItem.toolTip = "Загружает новую версию с GitHub и перезапускает приложение. "
+                           + "Это единственное сетевое соединение MacPulse наружу."
+        menu.addItem(updateItem)
 
         menu.addItem(.separator())
         let quitItem = NSMenuItem(title: "Выход", action: #selector(quit), keyEquivalent: "q")
@@ -243,7 +271,141 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem === headerItem { return false }
         if menuItem === cleanupItem { return !isCleaning }
+        if menuItem === updateItem { return !isUpdating }
         return true
+    }
+
+    // MARK: - Self-update
+    //
+    // See Sources/Updater.swift for the contract this operates under —
+    // one file, HTTPS, three GitHub hosts, nothing else.
+
+    /// One check shortly after launch, then one every six hours.
+    ///
+    /// COST. MacPulse idles at 0.27% of one core and this must not appear
+    /// in that number at all, so:
+    ///
+    ///   * Six hours, not six minutes. One round trip per 21 600 seconds.
+    ///     A full check measured end to end is a few tens of milliseconds
+    ///     of CPU, i.e. around 0.0002% of a core amortised — three orders
+    ///     of magnitude under the idle budget. `--cost-log` is what
+    ///     proves that rather than this comment.
+    ///   * A 30-minute `tolerance`, so the timer never forces a wake of
+    ///     its own — the kernel coalesces it into a wake that was going
+    ///     to happen anyway. A timer without tolerance is a timer that
+    ///     costs power even when its handler is free.
+    ///   * Between checks the updater owns no thread and no connection:
+    ///     the URLSession is ephemeral, created per request and
+    ///     invalidated in its own completion handler.
+    ///
+    /// The launch check waits 45 s deliberately: long enough that it is
+    /// not competing with the island's first layout, and late enough
+    /// that `--cost-log`'s default 10 s settle window does NOT exclude
+    /// it. The measurement should contain the check, not dodge it.
+    private func scheduleUpdateChecks() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 45) { [weak self] in
+            self?.checkForUpdates(silent: true)
+        }
+        let timer = Timer.scheduledTimer(withTimeInterval: 6 * 60 * 60, repeats: true) { [weak self] _ in
+            self?.checkForUpdates(silent: true)
+        }
+        timer.tolerance = 30 * 60
+        updateTimer = timer
+    }
+
+    /// `silent` means: a failure is invisible.
+    ///
+    /// This is the rule the whole update path is built around. A user who
+    /// did not ask to check for updates must never see that a check
+    /// failed — no dialog at launch, no badge, not even a changed menu
+    /// title. Offline is the normal state of a laptop, not an error, and
+    /// an updater that reports it is an updater the user learns to
+    /// resent. Failures go to NSLog and nowhere else.
+    ///
+    /// A MANUAL check is the opposite: the user asked, so they get an
+    /// answer either way, in the item's title.
+    private func checkForUpdates(silent: Bool) {
+        guard !isUpdating else { return }
+        isUpdating = true
+        updateResetWork?.cancel()
+
+        Updater.checkForUpdate { [weak self] outcome in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch outcome {
+                case .unreachable(let why):
+                    NSLog("MacPulse: update check failed: \(why)")
+                    self.isUpdating = false
+                    if !silent {
+                        self.updateItem.title = "Не удалось проверить обновления"
+                        self.resetUpdateItemLater()
+                    } else {
+                        self.updateItem.title = Self.restingUpdateTitle
+                    }
+
+                case .upToDate(let version):
+                    NSLog("MacPulse: up to date (v\(version))")
+                    self.isUpdating = false
+                    if !silent {
+                        self.updateItem.title = "Обновлений нет (v\(version))"
+                        self.resetUpdateItemLater()
+                    } else {
+                        self.updateItem.title = Self.restingUpdateTitle
+                    }
+
+                case .available(let release):
+                    NSLog("MacPulse: v\(release.version) available, downloading")
+                    self.updateItem.title = "Скачиваю v\(release.version)… 0%"
+                    self.install(release)
+                }
+            }
+        }
+    }
+
+    private func install(_ release: Updater.ReleaseInfo) {
+        Updater.downloadAndInstall(release) { [weak self] fraction in
+            // Already on the main thread — Updater dispatches it there.
+            guard let self else { return }
+            if fraction >= 1 {
+                self.updateItem.title = "Проверяю и устанавливаю v\(release.version)…"
+            } else {
+                self.updateItem.title = "Скачиваю v\(release.version)… \(Int(fraction * 100))%"
+            }
+        } completion: { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let version):
+                    // The swap script relaunches us a second from now, so
+                    // this title is mostly there for the instant before
+                    // the app goes away.
+                    NSLog("MacPulse: installed v\(version), relaunching")
+                    self.updateItem.title = "Установлено v\(version) — перезапуск…"
+                case .failure(let why):
+                    // EVERY one of these leaves the installed app exactly
+                    // as it was. Nothing is swapped in that did not pass
+                    // all six checks in Updater.validate.
+                    NSLog("MacPulse: update refused — \(why)")
+                    self.isUpdating = false
+                    self.updateItem.title = "Обновление не установлено"
+                    self.resetUpdateItemLater()
+                }
+            }
+        }
+    }
+
+    /// Without this, a finished check leaves the item permanently
+    /// captioned with a stale result and the user has no way to ask
+    /// again. Cancellable, so a second click does not get stomped by the
+    /// first click's pending reset.
+    private func resetUpdateItemLater() {
+        updateResetWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.isUpdating else { return }
+            self.updateItem.title = Self.restingUpdateTitle
+        }
+        updateResetWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: work)
     }
 
     // MARK: - Actions
@@ -296,6 +458,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         let enabled = !CalendarEngine.shared.isEnabledByUser
         CalendarEngine.shared.setEnabled(enabled)
         sender.state = enabled ? .on : .off
+    }
+
+    @objc private func checkForUpdatesManually() {
+        guard !isUpdating else { return }
+        updateItem.title = "Проверяю…"
+        checkForUpdates(silent: false)
     }
 
     @objc private func quit() {

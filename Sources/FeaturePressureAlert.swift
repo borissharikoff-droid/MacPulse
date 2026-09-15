@@ -588,8 +588,15 @@ struct PressureAlertEntry: Equatable, Identifiable {
     }
 }
 
-/// Everything the «Давление» section draws, as drawn. Published from
-/// `IslandModel`, which is the only object the island's views observe.
+/// Everything the pressure fold at the bottom of «Память» draws, as
+/// drawn. Published from `IslandModel`, which is the only object the
+/// island's views observe.
+///
+/// It fed a «Давление» TAB until that tab was folded into «Память» — the
+/// two were one subject in two chips. Nothing in this struct changed in
+/// the move; `isQuiet` still decides whether the notifier is on screen at
+/// all, it just gates 45 pt at the bottom of another section now instead
+/// of a chip in the rail. See IslandPressureFold.swift.
 struct PressureAlertState: Equatable {
     /// The user's switch, persisted. Muted is a deliberate choice and is
     /// therefore state worth a chip: it is the only way back.
