@@ -614,11 +614,20 @@ enum Probe {
 
         let baseline = measure("baseline", seconds: 6)
 
+        // `/usr/bin/yes` is exec'd DIRECTLY — deliberately not through
+        // `/bin/sh -c "yes > /dev/null"`. With a shell in the middle, the
+        // Process handle refers to the shell, and if that shell forks instead
+        // of exec'ing, terminating it can leave an orphaned `yes` spinning —
+        // which is what used to be "solved" with `killall yes`. A kill by NAME
+        // would signal every process called `yes` in the user's session, not
+        // just the eight spawned here, and this app's safety contract allows
+        // terminating only `helpd` and apps the user explicitly quit. Exec'ing
+        // the loader directly makes each Process handle the loader itself, so
+        // terminating the handles we own is both sufficient and exact.
         var loaders: [Process] = []
         for _ in 0..<8 {
             let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/bin/sh")
-            p.arguments = ["-c", "yes > /dev/null"]
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/yes")
             p.standardOutput = FileHandle.nullDevice
             p.standardError = FileHandle.nullDevice
             if (try? p.run()) != nil { loaders.append(p) }
@@ -627,10 +636,13 @@ enum Probe {
         spin(seconds: 2)                      // let the scheduler settle
         let loaded = measure("loaded", seconds: 6)
 
-        for p in loaders { p.terminate() }
-        _ = shell("/usr/bin/killall", ["yes"])
+        // Terminate ONLY the children this probe created, by their own Process
+        // handles, and wait for each one to actually be gone.
+        for p in loaders where p.isRunning { p.terminate() }
         for p in loaders { p.waitUntilExit() }
-        print("  --- killed load ---")
+        let survivors = loaders.filter { $0.isRunning }.count
+        print("  --- killed load (\(loaders.count) children terminated, "
+            + "\(survivors) still running) ---")
         spin(seconds: 2)
         let after = measure("after", seconds: 6)
 
