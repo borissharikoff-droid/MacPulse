@@ -235,6 +235,15 @@ final class DiskSampler {
 final class NetworkSampler {
     private var previous: [String: (inBytes: UInt64, outBytes: UInt64)] = [:]
     private var previousAt: UInt64?
+    /// Our own 64-bit since-start totals, per interface name.
+    ///
+    /// PRUNED EVERY TICK to the interfaces that still exist. utun*/awdl0 come
+    /// and go constantly (a VPN reconnect, AirDrop, a Personal Hotspot each
+    /// mint a fresh name), so an unpruned map gains an entry for every
+    /// interface name ever seen and never gives one back — unbounded growth in
+    /// a process expected to run for weeks. An interface that disappears and
+    /// returns under the same name starts its totals again, which is the
+    /// honest answer: it is a different interface.
     private var accumulated: [String: (inBytes: UInt64, outBytes: UInt64)] = [:]
 
     func sample() -> NetworkMetrics? {
@@ -245,6 +254,15 @@ final class NetworkSampler {
         guard let previousAt else { return nil }     // first tick has no rate
         let dt = Mono.seconds(from: previousAt, to: now)
         guard dt > 0.0001 else { return nil }
+
+        // Retire interfaces that are gone from this sample BEFORE accumulating
+        // into the map, so its size is bounded by the number of interfaces the
+        // machine has right now, not by the number it has ever had.
+        // (Unconditionally, not only when the map is bigger than the current
+        // set: one interface vanishing while another appears in the same tick
+        // keeps the counts equal while leaving a stale entry behind. Filtering
+        // ~15 entries once a second costs nothing.)
+        accumulated = accumulated.filter { current[$0.key] != nil }
 
         var interfaces: [NetworkInterfaceMetrics] = []
         var totalIn = 0.0, totalOut = 0.0
