@@ -60,14 +60,19 @@ enum Probe {
         print("PHASE 4 — sampling cost")
         line()
         func stats(_ label: String, _ xs: [Double]) {
-            guard !xs.isEmpty else { print("  \(label): none"); return }
+            // No force-unwraps: a diagnostic harness that traps tells you
+            // nothing about the thing you were diagnosing.
             let sorted = xs.sorted()
+            guard let low = sorted.first, let high = sorted.last else {
+                print("  \(label): none"); return
+            }
+            let p95 = sorted[min(sorted.count - 1, max(0, Int(Double(sorted.count) * 0.95)))]
             print(String(format: "  %-38@ n=%3d  min=%6.2f  median=%6.2f  mean=%6.2f  p95=%6.2f  max=%7.2f  (ms)",
-                         label as NSString, xs.count, sorted.first!,
+                         label as NSString, xs.count, low,
                          sorted[sorted.count / 2],
                          xs.reduce(0, +) / Double(xs.count),
-                         sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))],
-                         sorted.last!))
+                         p95,
+                         high))
         }
         // The first tick also pays for lazy sampler construction (IOReport
         // subscription + the one-time SMC key enumeration), so it is reported
@@ -340,7 +345,11 @@ enum Probe {
             print("             top's 'used' does NOT subtract the file cache, so it should sit ABOUT")
             print("             cacheBytes higher than ours: ours+cache = \(Fmt.bytes(m.usedBytes + m.cacheBytes)) "
                 + "(cache = \(Fmt.bytes(m.cacheBytes)))")
-            if let line = physMem, let topUsed = parseTopSize(String(line.split(separator: " ")[1])) {
+            // `top`'s PhysMem line is "PhysMem: 7451M used (...)". A truncated
+            // or reworded line must degrade to "no cross-check", never index
+            // past the end of the split.
+            let fields = physMem.map { $0.split(separator: " ") } ?? []
+            if fields.count >= 2, let topUsed = parseTopSize(String(fields[1])) {
                 let ourEquivalent = Double(m.usedBytes + m.cacheBytes)
                 let pct = abs(ourEquivalent - Double(topUsed)) / Double(topUsed) * 100
                 print(String(format: "             top used=%@ vs ours+cache=%@  Δ %.1f%%  %@",
