@@ -317,8 +317,14 @@ private struct MemoryHero: View {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color(white: 0.18))
-                        Capsule().fill(tint)
-                            .frame(width: geo.size.width * CGFloat(min(memory?.pressureHeuristic ?? 0, 1)))
+                        // The heuristic is Optional and nil means "not
+                        // measurable" (total RAM unknown). Then the track is
+                        // drawn with NO fill at all rather than a fill of
+                        // width 0 standing in for a measured zero.
+                        if let heuristic = memory?.pressureHeuristic {
+                            Capsule().fill(tint)
+                                .frame(width: geo.size.width * CGFloat(min(max(heuristic, 0), 1)))
+                        }
                     }
                 }
                 .frame(height: 5)

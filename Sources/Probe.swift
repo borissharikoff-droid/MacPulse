@@ -164,10 +164,16 @@ enum Probe {
             for cluster in c.clusters {
                 parts.append(String(format: "%@(%d)=%.1f%%", cluster.name, cluster.coreCount, cluster.load.busy * 100))
             }
+            // The load averages are Optional: getloadavg() can fail, and an
+            // unavailable load average prints as "—", not as 0.00.
+            let avg = [c.loadAverage1, c.loadAverage5, c.loadAverage15]
+                .map { $0.map { String(format: "%.2f", $0) } ?? "—" }
+                .joined(separator: "/")
+            let unmeasured = c.cores.filter { $0 == nil }.count
             print("  CPU   " + parts.joined(separator: "  ")
-                + String(format: "  user=%.1f%% sys=%.1f%%  load=%.2f/%.2f/%.2f",
-                         c.overall.user * 100, c.overall.system * 100,
-                         c.loadAverage1, c.loadAverage5, c.loadAverage15))
+                + String(format: "  user=%.1f%% sys=%.1f%%  load=%@",
+                         c.overall.user * 100, c.overall.system * 100, avg as NSString)
+                + (unmeasured > 0 ? "  (\(unmeasured)/\(c.cores.count) cores unmeasured)" : ""))
         } else {
             print("  CPU   — (first tick)")
         }

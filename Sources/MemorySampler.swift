@@ -120,7 +120,7 @@ final class MemorySampler {
             cacheBytes: purgeable + external,
             uncompressedInCompressorBytes: bytes64(vm.total_uncompressed_pages_in_compressor),
             pressureLevel: Self.pressureLevel(),
-            pressureHeuristic: total > 0 ? Double(wired + compressed) / Double(total) : 0,
+            pressureHeuristic: total > 0 ? Double(wired + compressed) / Double(total) : nil,
             swapTotalBytes: swap?.total,
             swapUsedBytes: swap?.used,
             swapFreeBytes: swap?.free,

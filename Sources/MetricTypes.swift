@@ -108,8 +108,10 @@ public struct MemoryMetrics: Sendable {
         return Double(uncompressedInCompressorBytes) / Double(compressedBytes)
     }
 
-    public var usedFraction: Double {
-        totalBytes > 0 ? Double(usedBytes) / Double(totalBytes) : 0
+    /// nil when the machine's total RAM is unknown (`hw.memsize` failed), not
+    /// 0 — an unknown fraction must render as "—", never as an empty bar.
+    public var usedFraction: Double? {
+        totalBytes > 0 ? Double(usedBytes) / Double(totalBytes) : nil
     }
 
     /// nil if the sysctl failed or returned a level we don't recognise.
@@ -118,7 +120,11 @@ public struct MemoryMetrics: Sendable {
     /// Good for a BAR HEIGHT. It is NOT Apple's formula — Apple documents the
     /// factors, never the expression — so never label it "Activity Monitor's
     /// memory pressure". Color must come from `pressureLevel`.
-    public let pressureHeuristic: Double
+    ///
+    /// nil when total RAM is unknown, because the ratio then has no
+    /// denominator. A 0 there would draw an empty bar, i.e. claim "no
+    /// pressure" on the strength of a failed sysctl.
+    public let pressureHeuristic: Double?
 
     // ---- swap size (sysctl vm.swapusage) ----
     public let swapTotalBytes: UInt64?
@@ -162,12 +168,19 @@ public struct CPUMetrics: Sendable {
     /// Whole-machine average across all logical CPUs.
     public let overall: CPULoad
     /// P and E aggregated. Empty only if topology detection failed entirely.
+    /// A cluster whose counters did not advance is OMITTED, never published
+    /// as 0% busy.
     public let clusters: [CPUCluster]
-    /// Per-logical-core, index-aligned with the kernel's ordering.
-    public let cores: [CPULoad]
-    public let loadAverage1: Double
-    public let loadAverage5: Double
-    public let loadAverage15: Double
+    /// Per-logical-core, index-aligned with the kernel's ordering. A nil entry
+    /// is a core whose tick counters did not advance over the interval — we
+    /// could not measure it. That is NOT the same as an idle core (an idle
+    /// core still accumulates idle ticks), so it is not reported as one.
+    public let cores: [CPULoad?]
+    /// From `getloadavg`. nil when that call failed — zeros would read as
+    /// "the machine is idle", which is a measurement, not an absence of one.
+    public let loadAverage1: Double?
+    public let loadAverage5: Double?
+    public let loadAverage15: Double?
 
     public var performance: CPUCluster? { clusters.first { $0.kind == .performance } }
     public var efficiency: CPUCluster? { clusters.first { $0.kind == .efficiency } }
