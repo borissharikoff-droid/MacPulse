@@ -15,6 +15,19 @@ if CommandLine.arguments.contains("--wing-probe") {
     IslandGeometryProbe.run(arguments: CommandLine.arguments)
 }
 
+// One real loopback fetch through the shipping PultLink, printed beside
+// the values PrinterFeature.parse made of it. See FeatureProbes.swift.
+if CommandLine.arguments.contains("--printer-probe") {
+    PrinterProbe.run(arguments: CommandLine.arguments)
+}
+
+// Live trace of the mic/camera rail: one line per published change, so a
+// real recording can be started and stopped against it.
+//   ... --privacy-probe 60
+if CommandLine.arguments.contains("--privacy-probe") {
+    PrivacyProbe.run(arguments: CommandLine.arguments)
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
