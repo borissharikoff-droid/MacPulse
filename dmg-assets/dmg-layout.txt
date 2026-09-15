@@ -1,0 +1,22 @@
+DMG window layout — the numbers dmg-background.png was drawn for.
+
+The background art is not decoration that can be dropped in at any size:
+the arrow points from one icon slot to the other, and it is wrong the
+moment either slot moves. Whatever builds the .dmg must use exactly these.
+
+  window content size      640 x 400   (so: bounds {x, y, x+640, y+400})
+  icon size                128
+  background                .background/dmg-background.png
+                            (Finder picks up dmg-background@2x.png beside it
+                             on a Retina display, automatically)
+
+  icon positions, Finder's own coordinates (origin top-left, centre of icon)
+    MacPulse.app           168, 208
+    Applications (alias)   472, 208
+
+  everything else in the window must be hidden — the sidebar, the toolbar,
+  the status bar — or the content size above no longer matches what the
+  background is drawn against.
+
+Regenerate the background with ./make-icon.sh; the constants live in
+Tools/IconRender.swift under `enum DMG`.

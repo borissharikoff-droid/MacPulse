@@ -147,6 +147,21 @@ echo "==> Contract OK: no CFNetwork, no Network.framework, no Security.framework
 
 cp "$ROOT/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 
+# The icon. Info.plist names it (CFBundleIconFile = AppIcon) and macOS then
+# looks for Contents/Resources/AppIcon.icns; miss either half and the app is
+# a blank generic document in Finder and in the Dock, with no error anywhere
+# to say why.
+#
+# Checked explicitly rather than left to `cp` to fail under set -e, because
+# the fix is a specific command and not a guessable one: AppIcon.icns is a
+# BUILT artifact, rendered from Tools/IconRender.swift.
+if [ ! -f "$ROOT/AppIcon.icns" ]; then
+  echo "error: AppIcon.icns is missing. Run ./make-icon.sh — it renders" >&2
+  echo "       Icon.iconset from Tools/IconRender.swift and packs the .icns." >&2
+  exit 1
+fi
+cp "$ROOT/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+
 # A stable local signing identity (not ad-hoc "-") so the code signature's
 # designated requirement stays the same across rebuilds — matches the
 # identity CmdTabSwitcher already uses; one local dev cert can sign

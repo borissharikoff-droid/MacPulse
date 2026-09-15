@@ -6,6 +6,8 @@
 	<string>MacPulse</string>
 	<key>CFBundleExecutable</key>
 	<string>MacPulse</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>io.github.borissharikoff-droid.MacPulse</string>
 	<key>CFBundleName</key>
