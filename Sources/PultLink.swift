@@ -63,10 +63,18 @@ import Foundation
 // with the printer powered down, ~1 ms once ARP had learned the host was
 // down, and 0.2 ms to fail outright when the panel is not running.
 //
-// So: connect gets a short non-blocking deadline, the read gets both an
-// SO_RCVTIMEO and a wall-clock deadline (a server that dribbles one byte
-// at a time cannot outlast either), the body is capped, and every call is
-// made from a utility queue. Nothing here ever runs on main.
+// So: connect gets a short non-blocking deadline; the read gets a
+// wall-clock deadline AND an SO_RCVTIMEO that is DERIVED FROM IT and
+// re-armed before every read, so neither a peer that goes silent nor one
+// that dribbles a byte at a time can outlast `readTimeout`; the body is
+// capped; and every call is made from a utility queue. Nothing here ever
+// runs on main.
+//
+// (It used to set SO_RCVTIMEO to `connectTimeout + 12` = 13 s underneath a
+// 12 s wall deadline that was only checked BETWEEN reads, so one silent
+// peer could hold the thread 13 s and a dribbler ~25 s — both longer than
+// the ~12 s this header and FeaturePrinter both promised. The socket
+// timeout must never be larger than the deadline it is supposed to serve.)
 // =====================================================================
 
 enum PultLinkError: Error, CustomStringConvertible {
@@ -131,7 +139,14 @@ enum PultLink {
     /// else's job (see FeaturePrinter).
     static func fetchPrinterStatus(connectTimeout: TimeInterval = 0.75,
                                    readTimeout: TimeInterval = 12.0) throws -> String {
-        let fd = try connectLoopback(timeout: connectTimeout)
+        // Both budgets are clamped to something a timeval can hold, so a
+        // caller (or a future edit) cannot turn a timeout into a trapping
+        // Double -> Int conversion, and cannot ask for a wait measured in
+        // centuries either.
+        let connectBudget = Self.clampSeconds(connectTimeout, max: 10)
+        let readBudget = Self.clampSeconds(readTimeout, max: 60)
+
+        let fd = try connectLoopback(timeout: connectBudget, readBudget: readBudget)
         defer { close(fd) }
 
         let out = Array(request.utf8)
@@ -152,12 +167,24 @@ enum PultLink {
         // Wall-clock deadline as well as SO_RCVTIMEO: the socket timeout
         // only fires on a read that stalls completely, and a peer that
         // sends one byte per second would reset it forever.
-        let deadline = Date().addingTimeInterval(readTimeout)
+        //
+        // THE SOCKET TIMEOUT IS DERIVED FROM THE DEADLINE, NEVER LARGER
+        // THAN IT, AND IT IS RE-ARMED BEFORE EVERY READ. It used to be a
+        // flat `connectTimeout + 12` = 13 s sitting under a 12 s wall
+        // deadline that was only tested BETWEEN reads, so a peer that
+        // completed the handshake and then went silent held this thread
+        // inside ONE read() for 13 s, and a dribbler that stalled just
+        // before the deadline reached ~25 s — against a documented "~12 s
+        // worst case". Now the remaining budget is what the kernel is told,
+        // so the real worst case is the number in the signature.
+        let deadline = Date().addingTimeInterval(readBudget)
         var buf = [UInt8](repeating: 0, count: 8192)
         var acc = [UInt8]()
         acc.reserveCapacity(2048)
         while true {
-            if Date() >= deadline { throw PultLinkError.readTimedOut }
+            let remaining = deadline.timeIntervalSinceNow
+            if remaining <= 0 { throw PultLinkError.readTimedOut }
+            Self.setReceiveTimeout(fd, seconds: remaining)
             let n = read(fd, &buf, buf.count)
             if n == 0 { break }                       // clean EOF: Connection: close
             if n < 0 {
@@ -189,7 +216,24 @@ enum PultLink {
 
     // MARK: - The socket
 
-    private static func connectLoopback(timeout: TimeInterval) throws -> Int32 {
+    /// Seconds, guaranteed finite, non-negative and small enough that
+    /// `Int(_:)` on it cannot trap. Every timeout in this file goes through
+    /// here before it reaches a `timeval` or a `poll` millisecond count.
+    private static func clampSeconds(_ v: TimeInterval, max cap: TimeInterval) -> TimeInterval {
+        guard v.isFinite, v > 0 else { return 0.05 }
+        return Swift.min(v, cap)
+    }
+
+    /// Arm SO_RCVTIMEO with a budget already known to be finite and small.
+    private static func setReceiveTimeout(_ fd: Int32, seconds: TimeInterval) {
+        let s = clampSeconds(seconds, max: 60)
+        var tv = timeval(tv_sec: Int(s),                                  // <= 60, cannot trap
+                         tv_usec: suseconds_t((s - s.rounded(.down)) * 1_000_000))
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+    }
+
+    private static func connectLoopback(timeout: TimeInterval,
+                                        readBudget: TimeInterval) throws -> Int32 {
         let fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
         guard fd >= 0 else { throw PultLinkError.socketFailed(errno) }
 
@@ -218,6 +262,8 @@ enum PultLink {
                 let e = errno; close(fd); throw PultLinkError.connectRefused(e)
             }
             var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+            // `timeout` is already clamped finite and <= 10 s by the caller,
+            // so this Int32 conversion cannot trap.
             let pr = poll(&pfd, 1, Int32(timeout * 1000))
             if pr <= 0 { close(fd); throw PultLinkError.connectTimedOut }
             var soErr: Int32 = 0
@@ -227,9 +273,15 @@ enum PultLink {
         }
         _ = fcntl(fd, F_SETFL, flags)     // back to blocking for the r/w timeouts
 
-        var tv = timeval(tv_sec: Int(timeout.rounded(.up)) + 12, tv_usec: 0)
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        // Send side: the request is 120 bytes into a loopback socket buffer,
+        // so this only matters if the peer never drains. It gets the connect
+        // budget, not the read budget — there is nothing to wait for yet.
+        var sndtv = timeval(tv_sec: Int(clampSeconds(timeout, max: 10)), tv_usec: 250_000)
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &sndtv, socklen_t(MemoryLayout<timeval>.size))
+        // Receive side: an initial arming only. The read loop re-arms it
+        // with the REMAINING wall-clock budget before every read, which is
+        // what makes the documented worst case true.
+        setReceiveTimeout(fd, seconds: readBudget)
         // Without this a write to a peer that closed first raises SIGPIPE
         // and kills the whole app rather than returning EPIPE.
         var one: Int32 = 1
@@ -266,7 +318,9 @@ enum PultLink {
     /// Human-readable peer, for `--printer-probe` only. Never used by the
     /// UI and never logged in the shipping path.
     static func describePeerForProbe() -> String {
-        guard let fd = try? connectLoopback(timeout: 0.75) else { return "not listening" }
+        guard let fd = try? connectLoopback(timeout: 0.75, readBudget: 1) else {
+            return "not listening"
+        }
         defer { close(fd) }
         var peer = sockaddr_in()
         var len = socklen_t(MemoryLayout<sockaddr_in>.size)
