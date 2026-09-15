@@ -172,8 +172,19 @@ final class IslandModel: ObservableObject {
     // ---- the Память section ----
     @Published private(set) var memorySection = MemorySectionState()
 
+    // ---- features that are not driven by MetricsEngine ----
+    //
+    // This one is EVENT-DRIVEN and publishes only when its own displayed
+    // value changes, which is the hard rule from the measurements at the
+    // top of this file: it moves when a sensor actually starts or stops,
+    // and on a normal day that is never.
+
+    /// Who is holding the microphone, and whether a camera is on.
+    @Published private(set) var privacy = PrivacyState()
+
     private let iconCache = AppIconCache()
     private var token: MetricsObserverToken?
+    private lazy var privacyWatcher = PrivacyWatcher(model: self)
 
     // MARK: - Lifecycle
 
@@ -184,11 +195,13 @@ final class IslandModel: ObservableObject {
         token = MetricsEngine.shared.observe { [weak self] snap in
             self?.ingest(snap)
         }
+        privacyWatcher.start()
     }
 
     func stop() {
         if let token { MetricsEngine.shared.remove(token) }
         token = nil
+        privacyWatcher.stop()
     }
 
     func setGeometry(notchSize: CGSize, hasPhysicalNotch: Bool) {
@@ -300,7 +313,16 @@ final class IslandModel: ObservableObject {
     /// Rebuild everything the OPEN panel draws. Never called while shut.
     private func refreshPanel(_ snap: MetricsSnapshot) {
         rebuildMemorySection(snap)
+        refreshRouter()
+    }
 
+    /// Which chips the rail shows, and which one is selected.
+    ///
+    /// Split out of `refreshPanel` because a feature that is NOT driven by
+    /// MetricsEngine can come alive between two metric ticks, and the rail
+    /// would otherwise be up to a full tick out of date at exactly the
+    /// moment the user is looking at it.
+    private func refreshRouter() {
         // The rail lists only what is live. Memory always is, which is why
         // it is the fallback below and why the rail is never empty.
         let ids = IslandSectionRegistry.sections.filter { $0.hasState(self) }.map(\.id)
@@ -314,12 +336,37 @@ final class IslandModel: ObservableObject {
         refreshFooter()
     }
 
+    // MARK: - Feature state
+
+    /// Called by `PrivacyWatcher` on the main thread when a sensor starts
+    /// or stops.
+    ///
+    /// Deliberately does NOT touch the wings. The privacy rail is sized to
+    /// fit inside the RESTING 26 pt wing precisely so that the one signal
+    /// nothing may preempt can never be starved by a width negotiation it
+    /// might lose. See IslandMetrics.privacyRailWidth.
+    func setPrivacy(_ state: PrivacyState) {
+        precondition(Thread.isMainThread)
+        guard privacy != state else { return }
+        privacy = state
+        // The footer names the app in words. It is not a section, so
+        // nothing else would refresh it.
+        if status == .opened { refreshFooter() }
+    }
+
     private func refreshFooter() {
-        let line = IslandSectionRegistry.sections
+        var clauses: [String] = []
+        // FIRST, ALWAYS. The privacy rail has no tab of its own — a safety
+        // signal you have to navigate to is not one — so the footer is
+        // where "which app is holding the microphone" gets said in words
+        // rather than as a 6 pt dot. It leads the line because nothing
+        // else on it could matter more.
+        if let privacyClause = PrivacyFooter.line(privacy) { clauses.append(privacyClause) }
+        clauses += IslandSectionRegistry.sections
             .filter { $0.id != selectedSection && visibleSections.contains($0.id) }
             .compactMap { $0.footerSummary(self) }
             .filter { !$0.isEmpty }
-            .joined(separator: " · ")
+        let line = clauses.joined(separator: " · ")
         if footerLine != line { footerLine = line }
     }
 

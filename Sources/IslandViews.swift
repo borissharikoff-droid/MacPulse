@@ -42,6 +42,13 @@ enum IslandPalette {
     /// Used for "could not measure". Never for a measured zero.
     static let unknown = Color(white: 0.45)
 
+    /// The privacy rail deliberately borrows the SYSTEM's own indicator
+    /// colours — orange for the microphone, green for the camera — so the
+    /// user does not have to learn a second vocabulary for a fact macOS
+    /// already tells them in the menu bar.
+    static let micInUse = Color(red: 1.00, green: 0.58, blue: 0.00)
+    static let cameraInUse = Color(red: 0.22, green: 0.80, blue: 0.35)
+
     static func color(for level: MemoryPressureLevel?) -> Color {
         switch level {
         case .normal: return normal
@@ -221,7 +228,7 @@ struct IslandView: View {
                 Color.clear
                     .frame(width: model.notchSize.width, height: model.notchSize.height)
 
-                IslandTrailingWing(model: model)
+                IslandTrailingWing(model: model, availableWidth: trailingStripWidth)
                     .frame(width: trailingStripWidth,
                            height: model.notchSize.height, alignment: .leading)
             }

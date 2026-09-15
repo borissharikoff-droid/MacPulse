@@ -125,6 +125,50 @@ enum IslandGeometryProbe {
                   + "  " + (statusItemX == nil ? "n/a" : (fits ? "yes" : "NO")))
         }
 
+        // ---- what actually fits INSIDE the granted wing ----
+        //
+        // INVARIANT 5 — the privacy rail is never squeezed. It is a safety
+        // signal and it is sized to fit the RESTING wing precisely so that
+        // it never has to win a width negotiation. If somebody widens the
+        // dots without re-checking the sum, this is what says so.
+        check(IslandMetrics.privacyRailWidth <= IslandMetrics.restingWingWidth,
+              "privacy rail (\(fmt(IslandMetrics.privacyRailWidth)) pt) does not fit the "
+              + "resting wing (\(fmt(IslandMetrics.restingWingWidth)) pt)")
+
+        print("")
+        print("  wing   privacy  slot  slot-text  rail   spent / wing")
+        print("  -----  -------  ----  ---------  -----  ------------")
+        for wing in [IslandMetrics.restingWingWidth, 40, 60, limit,
+                     IslandMetrics.maxTrailingWingWidth] as [CGFloat] {
+            for privacy in [false, true] {
+                let l = IslandMetrics.trailingLayout(wing: wing,
+                                                     privacyVisible: privacy,
+                                                     slotVisible: true)
+                let spent = (l.slotWidth > 0 ? IslandMetrics.slotLeadingGap + l.slotWidth : 0)
+                    + (l.railWidth > 0 && l.slotWidth > 0 ? IslandMetrics.slotGap : 0)
+                    + l.railWidth
+
+                // INVARIANT 6 — the contents never draw wider than the
+                // wing. Pixels outside the wing are pixels outside the hit
+                // rect, where clicks go to the menu bar instead of to us.
+                check(spent <= wing + 0.01,
+                      "wing \(fmt(wing)) privacy=\(privacy): contents spend \(fmt(spent)) pt")
+
+                // INVARIANT 7 — when a sensor is in use the rail is drawn
+                // at FULL width at every wing width the model can grant.
+                if privacy {
+                    check(abs(l.railWidth - IslandMetrics.privacyRailWidth) < 0.01,
+                          "wing \(fmt(wing)): privacy rail truncated to \(fmt(l.railWidth)) pt")
+                }
+
+                print("  " + pad(fmt(wing), 5) + "  " + pad(privacy ? "on" : "off", 7)
+                      + "  " + pad(fmt(l.slotWidth), 4)
+                      + "  " + pad(l.showsSlotText ? "yes" : "no", 9)
+                      + "  " + pad(fmt(l.railWidth), 5)
+                      + "  " + pad(fmt(spent), 5) + " / " + fmt(wing))
+            }
+        }
+
         // The opened panel: 560 x 280, centred, and it does not grow.
         let opened = IslandMetrics.openedPlate()
         let openedRect = islandRect(opened)

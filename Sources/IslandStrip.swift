@@ -20,11 +20,16 @@ import SwiftUI
 // rests at 26 pt and grows on request up to the runtime bound in
 // IslandMetrics.
 //
-// AT THIS PHASE THE TRAILING WING IS EMPTY AND RESTING. The mechanism
-// — dynamic width, hit rect that follows it, runtime bound against our
-// own status item — is what is built here; filling it is the next
-// agent's job. `IslandModel.requestTrailingWing` is the entry point, and
-// `IslandTrailingWing` below is where the content goes.
+// WHAT IS IN THE TRAILING WING NOW. The PRIVACY RAIL, pinned at the far
+// right, which nothing may preempt and which is sized to fit inside the
+// resting 26 pt so it never has to ask for width at all. To its left is
+// ONE live slot for whatever the model's arbiter picks; no feature claims
+// it yet, so it is empty and the wing stays at 26.
+//
+// The arithmetic for "what is left after the rail" is in
+// `IslandMetrics.trailingLayout` and nowhere else, for the same reason
+// `collapsedPlate` is: two copies of a layout rule is how the drawn thing
+// and the hit-tested thing drift apart.
 // =====================================================================
 
 struct PressureDot: View {
@@ -71,10 +76,32 @@ struct IslandLeadingWing: View {
 /// opens the panel on the matching tab.
 struct IslandTrailingWing: View {
     @ObservedObject var model: IslandModel
+    /// What the wing is ACTUALLY this wide right now. Collapsed that is
+    /// `model.trailingWingWidth`; open it is half of whatever is left of
+    /// the 560 pt panel. Passed in rather than read here so there is one
+    /// answer, the one `IslandView` also used to lay out the row.
+    let availableWidth: CGFloat
+
+    private var layout: IslandMetrics.TrailingLayout {
+        IslandMetrics.trailingLayout(wing: availableWidth,
+                                     privacyVisible: !model.privacy.isQuiet,
+                                     slotVisible: false)
+    }
 
     var body: some View {
-        // Nothing yet, by design. The wing is at its resting 26 pt and the
-        // island looks exactly as it did before it became asymmetric.
-        Color.clear
+        let l = layout
+        HStack(spacing: 0) {
+            Spacer(minLength: 0).frame(width: IslandMetrics.slotLeadingGap)
+
+            Spacer(minLength: 0)
+
+            // LAST, AND ALWAYS. Drawn after the Spacer so it is pinned to
+            // the far right whatever else is in the wing.
+            if l.railWidth > 0 {
+                IslandPrivacyRail(state: model.privacy)
+                    .frame(width: l.railWidth, alignment: .trailing)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 }

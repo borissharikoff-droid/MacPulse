@@ -68,6 +68,90 @@ enum IslandMetrics {
     /// smeared blob and the status item stops being clickable-looking.
     static let statusItemClearance: CGFloat = 40
 
+    // MARK: - What is inside the trailing wing
+    //
+    // Two things share it, and they are not equals.
+    //
+    // THE PRIVACY RAIL is pinned at the far right and NOTHING may preempt
+    // it. It is sized to fit inside the RESTING wing — 6 + 4 + 6 + 7 = 23
+    // against 26 — which is the whole point: the one safety signal on the
+    // island never has to ask for width, so it can never lose a width
+    // negotiation to a progress ring. If you widen the dots, check this
+    // sum again.
+    //
+    // THE LIVE SLOT is whatever the arbiter picked (print progress, this
+    // phase) and gets what is left after the rail. THE WORST CASE — both
+    // privacy dots up while a print runs, on this machine's real 79.5 pt
+    // grant — is the case the numbers below are tuned for, because it is
+    // the one where the feature has least room and still has to be legible:
+    //
+    //     79.5 granted - 7 lead-in - 23 rail - 4 gap = 45.5 pt available
+    //     14 ring + 4 gap + 25 text                  = 43   pt needed
+    //
+    // 2.5 pt of margin, and it was measured rather than guessed: the widest
+    // string `PrinterFeature.remaining` can produce is "1ч23"/"9ч59", which
+    // lays out at 23.4 pt in 9 pt medium monospaced digits (that is also
+    // why the formatter drops the minutes past ten hours — "23ч59" needs
+    // 29.3 pt and would truncate here).
+    //
+    // Below the text width the text is dropped and the ring stands alone;
+    // below the ring the slot disappears entirely and only the rail
+    // remains. The rail is never the thing that gives way.
+
+    static let privacyDotSize: CGFloat = 6
+    static let privacyDotGap: CGFloat = 4
+    /// Between the last dot and the right edge of the drawn plate.
+    static let privacyRailPadding: CGFloat = 7
+    /// Two dots plus the gap plus the padding. MUST be <= restingWingWidth.
+    static let privacyRailWidth: CGFloat =
+        privacyDotSize * 2 + privacyDotGap + privacyRailPadding
+
+    /// Clearance between the camera housing and the first pixel of the
+    /// slot. The housing is glass; drawing right up to it looks like a
+    /// rendering fault.
+    static let slotLeadingGap: CGFloat = 7
+    /// Between the live slot and the privacy rail.
+    static let slotGap: CGFloat = 4
+    static let ringDiameter: CGFloat = 14
+    /// Room for the widest remaining-time form, "1ч23"/"9ч59", MEASURED at
+    /// 23.4 pt in 9 pt medium monospaced digits. Reserved whether or not
+    /// the current value is that wide, so the strip does not resize as the
+    /// estimate crosses an hour.
+    static let slotTextWidth: CGFloat = 25
+    static let ringTextGap: CGFloat = 4
+
+    /// How the trailing wing's width is actually spent.
+    ///
+    /// The ONE place this arithmetic exists — same rule as `collapsedPlate`
+    /// and for the same reason. Pure, so `--wing-probe` can check it at
+    /// every width the model will grant.
+    struct TrailingLayout: Equatable {
+        /// 0 when the slot did not fit at all.
+        let slotWidth: CGFloat
+        /// False when only the ring fits.
+        let showsSlotText: Bool
+        /// 0 when no sensor is in use.
+        let railWidth: CGFloat
+    }
+
+    static func trailingLayout(wing: CGFloat,
+                               privacyVisible: Bool,
+                               slotVisible: Bool) -> TrailingLayout {
+        let rail = privacyVisible ? min(privacyRailWidth, wing) : 0
+        guard slotVisible else {
+            return TrailingLayout(slotWidth: 0, showsSlotText: false, railWidth: rail)
+        }
+        let spare = wing - slotLeadingGap - rail - (rail > 0 ? slotGap : 0)
+        guard spare >= ringDiameter else {
+            return TrailingLayout(slotWidth: 0, showsSlotText: false, railWidth: rail)
+        }
+        let withText = ringDiameter + ringTextGap + slotTextWidth
+        if spare >= withText {
+            return TrailingLayout(slotWidth: withText, showsSlotText: true, railWidth: rail)
+        }
+        return TrailingLayout(slotWidth: ringDiameter, showsSlotText: false, railWidth: rail)
+    }
+
     // MARK: - Plate
 
     /// MPNotchShape's concave top fillets live OUTSIDE the visual body, so

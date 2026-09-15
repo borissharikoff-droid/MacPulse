@@ -71,6 +71,13 @@ fi
 # and IOKit.ps. libIOReport is NOT linked here — PowerSampler resolves it with
 # dlopen/dlsym so a missing private symbol degrades to "power unavailable"
 # instead of failing to launch.
+#
+# CoreAudio is the microphone half of the privacy rail: the macOS 14+ public
+# process-object API (kAudioHardwarePropertyProcessObjectList and friends),
+# which names the app holding the input device with no entitlement and no TCC
+# grant. CoreMediaIO is the camera half — device-level only; there is no
+# unprivileged per-process camera API on macOS. Neither pulls in anything the
+# contract forbids; the otool assertion after the build is what proves it.
 # Pin the DEPLOYMENT TARGET too. Without it swiftc stamps the binary with
 # whatever the host OS is (minos 26.0 was measured here) while Info.plist
 # advertised LSMinimumSystemVersion 13.0 — the two disagreeing is how you
@@ -85,7 +92,8 @@ swiftc -O \
   -target "$DEPLOY_TARGET" \
   -o "$BIN_PATH" \
   "$ROOT"/Sources/*.swift \
-  -framework AppKit -framework ServiceManagement -framework IOKit
+  -framework AppKit -framework ServiceManagement -framework IOKit \
+  -framework CoreAudio -framework CoreMediaIO
 
 # ============================================================================
 # CONTRACT GUARD (link side). The single most important check in the build.
