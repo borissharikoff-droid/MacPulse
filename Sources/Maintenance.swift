@@ -42,32 +42,74 @@ enum Maintenance {
 
     /// Runs entirely on a background queue, entirely offline, entirely
     /// unprivileged.
-    static func cleanCachesAndLogs() -> Result {
-        let fm = FileManager.default
-        let home = fm.homeDirectoryForCurrentUser
-        let cachesURL = home.appendingPathComponent("Library/Caches")
-        let logsURL = home.appendingPathComponent("Library/Logs")
+    /// The ONLY two directories this file may ever delete inside, relative to
+    /// the user's home. Nothing here takes a path from anywhere else.
+    private static let deletionRoots = ["Library/Caches", "Library/Logs"]
 
-        let cachesBefore = directorySizeBytes(cachesURL)
-        let logsBefore = directorySizeBytes(logsURL)
+    static func cleanCachesAndLogs() -> Result {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+
+        // A root that does not survive verification is skipped entirely —
+        // never deleted inside, never even measured.
+        let roots = deletionRoots.compactMap { verifiedRoot($0, under: home) }
+
+        let before = roots.reduce(Int64(0)) { $0 + directorySizeBytes($1) }
         let ramFreeBefore = MemorySampler.currentFreeBytes() ?? 0
 
         // Skip past any individual item that errors — some system
         // subfolders (CloudKit, Safari) refuse deletion even to their
         // owner, which is expected; keep going.
-        deleteContents(of: cachesURL)
-        deleteContents(of: logsURL)
+        for root in roots { deleteContents(of: root) }
 
         terminateHelpdIfRunning()
 
-        let cachesAfter = directorySizeBytes(cachesURL)
-        let logsAfter = directorySizeBytes(logsURL)
+        let after = roots.reduce(Int64(0)) { $0 + directorySizeBytes($1) }
         let ramFreeAfter = MemorySampler.currentFreeBytes() ?? 0
 
         return Result(
-            freedDiskBytes: max(0, (cachesBefore + logsBefore) - (cachesAfter + logsAfter)),
+            freedDiskBytes: max(0, before - after),
             ramFreeDeltaBytes: Int64(ramFreeAfter) - Int64(ramFreeBefore)
         )
+    }
+
+    /// Turns "Library/Caches" into a URL that is SAFE to recursively delete
+    /// inside, or nil.
+    ///
+    /// The deletion roots used to be built by string-appending onto
+    /// `homeDirectoryForCurrentUser` and handed straight to
+    /// `contentsOfDirectory(at:)` + `removeItem`. Nothing checked what was
+    /// actually at the end of that path. If `~/Library/Caches` were a symlink
+    /// — planted, or left behind by someone relocating their cache onto
+    /// another volume — the recursive delete would walk through it and empty
+    /// whatever it pointed at.
+    ///
+    /// Three conditions, all required:
+    ///   1. the item exists and is a directory;
+    ///   2. the item itself is not a symbolic link (checked WITHOUT following
+    ///      it, via .isSymbolicLinkKey on the unresolved URL);
+    ///   3. resolving every symlink in the path leaves it at exactly the
+    ///      expected location under the (also fully resolved) home directory —
+    ///      which catches a symlink anywhere in the chain, e.g. ~/Library
+    ///      itself, not just the last component.
+    private static func verifiedRoot(_ relativePath: String, under home: URL) -> URL? {
+        let fm = FileManager.default
+        let url = home.appendingPathComponent(relativePath)
+
+        guard let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey]),
+              values.isSymbolicLink != true,
+              values.isDirectory == true else { return nil }
+
+        let resolved = url.resolvingSymlinksInPath().standardizedFileURL
+        let expected = home.resolvingSymlinksInPath().standardizedFileURL
+            .appendingPathComponent(relativePath).standardizedFileURL
+        guard resolved.path == expected.path else { return nil }
+
+        // Belt and braces: the resolved path must still BE a directory.
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: resolved.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else { return nil }
+
+        return resolved
     }
 
     private static func directorySizeBytes(_ url: URL) -> Int64 {
@@ -89,7 +131,12 @@ enum Maintenance {
         return total
     }
 
-    /// Deletes only the CONTENTS of `url`, never `url` itself.
+    /// Deletes only the CONTENTS of `url`, never `url` itself. `url` must have
+    /// come from `verifiedRoot`.
+    ///
+    /// Items inside may themselves be symlinks; `removeItem` unlinks the link
+    /// and never follows it, so a symlink in a cache folder costs its target
+    /// nothing.
     private static func deleteContents(of url: URL) {
         let fm = FileManager.default
         guard let items = try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)
