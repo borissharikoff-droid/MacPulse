@@ -457,6 +457,13 @@ final class ClipboardEngine {
         /// Long edge of the retained thumbnail, in PIXELS.
         static let thumbnailPixels = 160
 
+        /// Hard ceiling for one thumbnail. A resampled 160 px picture is
+        /// normally a few KB; this exists so that a pathological source
+        /// (huge palette, noise) cannot quietly spend the whole history
+        /// budget on ONE row. Over it, the entry keeps its dimensions and
+        /// loses only the picture.
+        static let thumbnailBytesCeiling = 64 * 1024
+
         /// Encode as PNG first; if the PNG lands above this, re-encode as
         /// JPEG instead. A flat UI screenshot PNGs to ~4-10 KB at 160 px;
         /// a photograph does not, and 40 KB x 100 entries would eat the
@@ -837,6 +844,7 @@ final class ClipboardEngine {
                 }
                 var w: Int?
                 var h: Int?
+                var thumb: Data?
                 if data.count <= Budget.imageInspectBytes {
                     // NSBitmapImageRep parses the header to answer
                     // pixelsWide/pixelsHigh. It is AppKit, so it adds NO
@@ -846,18 +854,49 @@ final class ClipboardEngine {
                     if let rep = NSBitmapImageRep(data: data), rep.pixelsWide > 0, rep.pixelsHigh > 0 {
                         w = rep.pixelsWide
                         h = rep.pixelsHigh
+                        // The ONLY part of the picture that stays in RAM.
+                        // Derived here and not later because the original
+                        // bytes go to disk and are dropped immediately
+                        // after — there is no second chance to look at
+                        // them.
+                        thumb = ClipboardThumbnail.make(from: rep,
+                                                        longEdge: Budget.thumbnailPixels)
+                        // Enforced, not merely hoped for. A pathological
+                        // source — huge palette, heavy noise — can resample
+                        // into something far larger than the few KB this is
+                        // meant to be, and ONE such row must not be able to
+                        // spend the whole history budget. Over the ceiling
+                        // the row keeps its dimensions and loses only the
+                        // picture, which is the same trade the disk cap
+                        // makes one level down.
+                        if let t = thumb, t.count > Budget.thumbnailBytesCeiling { thumb = nil }
                     }
                 }
+
+                // Spool the ORIGINAL to disk so the shelf can drag a real
+                // file out. nil is an ordinary outcome — too big for the
+                // per-entry cap, the disk cap bit, or the write failed —
+                // and it costs the drag, not the entry: the row still
+                // shows its thumbnail and its dimensions.
+                let ext = ClipboardThumbnail.pathExtension(forPasteboardType: imageType)
+                let spooledPath = imageStore.spool(data,
+                                                   pathExtension: ext,
+                                                   perEntryCap: Budget.imageFileBytesPerEntry,
+                                                   totalCap: Budget.imageFileBytesTotal)
+
                 // The preview is the DIMENSIONS only; the size column is
                 // formatted from `byteCount` by the island, with `UIFmt`,
                 // like every other byte count in the app.
                 result = Candidate(kind: .image,
                                    preview: (w != nil && h != nil) ? "\(w!) x \(h!)" : "",
                                    byteCount: data.count,
-                                   payload: .notRetained,     // <-- the whole point
+                                   payload: spooledPath.map {
+                                       .imageFile(path: $0, type: imageType, bytes: data.count)
+                                   } ?? .notRetained,
                                    fingerprint: ClipboardEngine.fingerprint(of: data),
                                    source: source,
-                                   pixelWidth: w, pixelHeight: h, fileCount: nil)
+                                   pixelWidth: w, pixelHeight: h, fileCount: nil,
+                                   thumbnailPNG: thumb)
             }
             return result
         }
@@ -968,7 +1007,21 @@ final class ClipboardEngine {
                                    kind: c.kind,
                                    preview: preview,
                                    byteCount: c.byteCount,
-                                   retainedBytes: c.payload.retainedBytes + preview.utf8.count,
+                                   // THE THUMBNAIL COUNTS. It was left out
+                                   // when images retained nothing, and the
+                                   // omission survived them starting to: an
+                                   // image entry reported ~100 bytes (a path
+                                   // plus a preview) while really holding a
+                                   // ~20 KB picture, so the 2 MiB budget
+                                   // could not see it and 100 of them would
+                                   // have been 2 MB of invisible RAM — on
+                                   // the very machine this app exists to
+                                   // watch. Counted here, eviction
+                                   // self-corrects: fat thumbnails simply
+                                   // mean a shorter history.
+                                   retainedBytes: c.payload.retainedBytes
+                                                  + preview.utf8.count
+                                                  + (c.thumbnailPNG?.count ?? 0),
                                    capturedAt: Date(),
                                    sourceApplication: c.source,
                                    pixelWidth: c.pixelWidth,

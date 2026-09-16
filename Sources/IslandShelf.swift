@@ -53,16 +53,27 @@ import SwiftUI
 //   FILES              one `public.file-url` per file — a real file
 //                      reference, so Finder copies it, Telegram attaches
 //                      it and Figma imports it, instead of pasting a path
-//   an image           NOTHING, and the chip is inert.
+//   an IMAGE           also a `public.file-url` — see below
 //
-// THE IMAGE CASE IS AN HONEST REFUSAL, NOT AN OVERSIGHT. The engine never
-// retains image bytes — a copied screenshot is measured inside an
-// autoreleasepool and dropped, which is what keeps this whole feature's
-// history under 2 MiB on an 8 GB machine. So there is no image data to
-// offer. The chip shows the photo glyph and the pixel size that WAS
-// measured, and it neither drags nor clicks, exactly as `canRecopy == false`
-// rows already behaved. Inventing a thumbnail would mean retaining the
-// bytes, which is a budget change and not a UI one.
+// THE IMAGE CASE USED TO BE AN HONEST REFUSAL. This comment said so at
+// length: the engine retained no image bytes, so a chip had nothing to
+// drag, and inventing a thumbnail would have been a budget change rather
+// than a UI one. That reasoning was right, and the budget changed.
+//
+// What changed it is that the two halves of an image can live in different
+// places. The ORIGINAL is spooled to `NSTemporaryDirectory()` by
+// `ClipboardImageStore`, so RAM cost does not grow with the picture; a
+// THUMBNAIL of a few KB is the only resident part, and it is counted in
+// `retainedBytes` so eviction can see it. The drag then carries the FILE,
+// which is strictly better than carrying pixels would have been: a
+// screenshot dropped on Telegram arrives as a real .png that can be
+// forwarded and saved, where image data would have arrived as an anonymous
+// paste — and would have had to sit in memory to do it.
+//
+// So an image chip is live like any other. It goes inert only when its
+// spooled file is gone — the disk cap evicted it, or the OS cleared
+// /var/folders — and `draggingWriters` checks that at DRAG time, not at
+// draw time, because the file can vanish between the two.
 //
 // ---------------------------------------------------------------------
 // DRAGGING OUT OF THIS PANEL WORKS, AND IT WAS SPIKED BEFORE IT WAS BUILT.
@@ -118,8 +129,11 @@ struct ClipboardShelfItem: Equatable, Identifiable {
     /// on purpose: this state is republished only when the clipboard
     /// actually moves, so a relative age would sit on screen going stale.
     let time: String
-    /// False for an image or an over-budget copy: the payload was never
-    /// retained, so there is nothing to drag and nothing to put back.
+    /// False for an over-budget text copy, or for an image whose spooled
+    /// file is gone: there is nothing to drag and nothing to put back.
+    ///
+    /// An image is normally TRUE now — it was false for as long as the
+    /// engine kept nothing but dimensions.
     ///
     /// ONE BIT FOR BOTH AFFORDANCES, because `ClipboardEngine.recopy` and
     /// `ClipboardEngine.draggingWriters` refuse on exactly the same
@@ -892,15 +906,53 @@ enum ClipboardProbe {
             model.setClipboard(ClipboardFeature.state(engine.entries, engine.stats,
                                                       paused: engine.isPaused))
             check(engine.entries.first?.kind == .image, "kind == .image")
-            check(engine.entries.first?.canRecopy == false,
-                  "canRecopy == false -> the chip is inert: neither click nor drag")
-            check(engine.recopy(id: engine.entries.first!.id) == false,
-                  "recopy() refuses rather than pasting something truncated")
-            check(engine.draggingWriters(id: engine.entries.first!.id) == nil,
-                  ">>> draggingWriters() == nil: the engine never retained the pixels, "
-                  + "so no image data is offered and none is invented")
-            check((engine.entries.first?.retainedBytes ?? .max) < 64,
-                  "retains \(engine.entries.first?.retainedBytes ?? -1) bytes, not the image")
+
+            // THESE FOUR ASSERTIONS WERE INVERTED, and the inversion is the
+            // feature. They used to say the engine keeps nothing but
+            // dimensions, so an image chip is inert and drags nothing. It
+            // now spools the ORIGINAL to disk and keeps a thumbnail, so the
+            // chip both clicks and drags — and what it drags is a FILE,
+            // which is what makes a dropped screenshot arrive in Telegram
+            // as a .png rather than an anonymous paste.
+            check(engine.entries.first?.canRecopy == true,
+                  "canRecopy == true -> the chip both clicks and drags")
+
+            // A THUMBNAIL, AND A SMALL ONE. This is the only part of the
+            // picture in RAM; if it ever approaches the size of the image
+            // the whole design has quietly failed.
+            let thumb = engine.entries.first?.thumbnailPNG
+            check(thumb != nil, "a thumbnail was produced")
+            // STATE BOTH NUMBERS AND CLAIM NOTHING. An earlier version of
+            // this line said "far below the original" while the thumbnail
+            // was in fact LARGER — this probe's image is a flat teal
+            // rectangle, which PNG compresses to almost nothing, so the
+            // re-encoded RGBA thumbnail loses. That is an artefact of the
+            // test fixture, not of the design (a real screenshot goes the
+            // other way by a wide margin), but a message that asserts a
+            // comparison it did not make is worse than no message.
+            check((thumb?.count ?? .max) <= ClipboardEngine.Budget.thumbnailBytesCeiling,
+                  "thumbnail \(thumb?.count ?? -1) B vs original \(png.count) B "
+                  + "(flat-colour fixture: PNG compresses the original far better "
+                  + "than the resampled thumbnail — ceiling is what is asserted)")
+            // And it must be INSIDE the budget, not beside it.
+            check((engine.entries.first?.retainedBytes ?? 0) >= (thumb?.count ?? 0),
+                  ">>> the thumbnail is counted in retainedBytes "
+                  + "(\(engine.entries.first?.retainedBytes ?? -1) B), so eviction can see it")
+
+            // The drag carries a file URL, not pixels.
+            let writers = engine.draggingWriters(id: engine.entries.first!.id)
+            check(writers?.count == 1, ">>> draggingWriters() offers exactly one item")
+            let droppedURL = (writers?.first as? NSURL) as URL?
+            check(droppedURL?.isFileURL == true,
+                  ">>> what a drop receives is a FILE URL: \(droppedURL?.lastPathComponent ?? "—")")
+            check(droppedURL?.pathExtension == "png",
+                  "the file carries a real extension, so Finder and chat clients "
+                  + "see a picture rather than an unknown blob")
+            check(droppedURL.map { FileManager.default.fileExists(atPath: $0.path) } == true,
+                  "the spooled file is really on disk")
+
+            check(engine.recopy(id: engine.entries.first!.id) == true,
+                  "recopy() puts the image back on the pasteboard")
             // Compare against the PNG's OWN header rather than against the
             // 120x80 NSImage size: `lockFocus` on a Retina display backs the
             // image at 2x, so the file really is 240x160 and the engine is

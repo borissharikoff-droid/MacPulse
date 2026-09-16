@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 // =====================================================================
@@ -24,6 +25,67 @@ import Foundation
 // removes a path it was handed; it removes paths it wrote, inside a
 // directory it created.
 // =====================================================================
+
+/// Turning a copied image into the two things the shelf needs: a few-KB
+/// picture to draw, and a filename a drop target can understand.
+enum ClipboardThumbnail {
+
+    /// Downsample to `longEdge` and re-encode as PNG.
+    ///
+    /// PNG rather than the source format because this is a derived, tiny,
+    /// throwaway picture and PNG is the one encoder every representation
+    /// can be written to without asking what it started as.
+    ///
+    /// nil on any failure, which draws the `photo` glyph again rather
+    /// than a blank box.
+    static func make(from rep: NSBitmapImageRep, longEdge: Int) -> Data? {
+        let w = rep.pixelsWide, h = rep.pixelsHigh
+        guard w > 0, h > 0 else { return nil }
+
+        // Never UPSAMPLE. A 32x32 copied favicon would otherwise be blown
+        // up to 160 and cost more bytes than the original.
+        let scale = min(1.0, Double(longEdge) / Double(max(w, h)))
+        let tw = max(1, Int((Double(w) * scale).rounded()))
+        let th = max(1, Int((Double(h) * scale).rounded()))
+
+        guard let target = NSBitmapImageRep(bitmapDataPlanes: nil,
+                                            pixelsWide: tw, pixelsHigh: th,
+                                            bitsPerSample: 8, samplesPerPixel: 4,
+                                            hasAlpha: true, isPlanar: false,
+                                            colorSpaceName: .deviceRGB,
+                                            bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+        target.size = NSSize(width: tw, height: th)
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        guard let ctx = NSGraphicsContext(bitmapImageRep: target) else { return nil }
+        NSGraphicsContext.current = ctx
+        ctx.imageInterpolation = .high
+        rep.draw(in: NSRect(x: 0, y: 0, width: tw, height: th),
+                 from: .zero, operation: .copy, fraction: 1.0,
+                 respectFlipped: true, hints: nil)
+        ctx.flushGraphics()
+
+        return target.representation(using: .png, properties: [:])
+    }
+
+    /// A pasteboard UTI to a file extension, so a dropped screenshot
+    /// arrives as `something.png` rather than an extensionless blob that
+    /// Finder calls "document" and a chat client sends as an unknown file.
+    static func pathExtension(forPasteboardType type: String) -> String {
+        switch type {
+        case ClipboardTypes.png:  return "png"
+        case ClipboardTypes.jpeg: return "jpg"
+        case ClipboardTypes.heic: return "heic"
+        case ClipboardTypes.gif:  return "gif"
+        case ClipboardTypes.tiff: return "tiff"
+        // Unknown UTI: png is the safest guess because it is what the
+        // engine prefers to read in the first place, and a wrong
+        // extension is still better than none.
+        default: return "png"
+        }
+    }
+}
 
 final class ClipboardImageStore {
 
