@@ -423,7 +423,12 @@ final class IslandModel: ObservableObject {
 
     func select(_ id: IslandSectionID) {
         precondition(Thread.isMainThread)
-        guard visibleSections.contains(id), selectedSection != id else { return }
+        // ANY REGISTERED SECTION, live or not. The rail lists them all now,
+        // and a chip that is drawn but refuses to be clicked is worse than
+        // one that is hidden. A quiet section draws its own empty state —
+        // «Сейчас ничего не звучит», no print, no session — which is a
+        // useful answer rather than a blank panel.
+        guard IslandSectionRegistry.section(id) != nil, selectedSection != id else { return }
         selectedSection = id
         // Only the footer depends on which tab is selected; the section
         // states do not, so a tab click does not rebuild them.

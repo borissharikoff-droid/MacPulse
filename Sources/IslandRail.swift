@@ -41,12 +41,25 @@ import SwiftUI
 private struct RailChip: View {
     let section: IslandSection
     let isSelected: Bool
+    /// Whether this section has anything to report right now. Every section
+    /// is always listed; this is what tells them apart.
+    let isLive: Bool
     /// From `IslandRail.chipPadding(chips:)` — NOT a constant here. See
     /// that method for why the rail, and not the chip, decides it.
     let horizontalPadding: CGFloat
     let onTap: () -> Void
 
     @State private var hovering = false
+
+    /// Three states, and the gap between them has to be visible at a
+    /// glance: selected (white), live (readable), quiet (clearly dimmer,
+    /// but still legible — a chip you cannot read is a chip you cannot
+    /// choose, and choosing them is the point of listing them all).
+    private var tint: Color {
+        if isSelected { return .white }
+        if isLive { return Color(white: hovering ? 0.78 : 0.62) }
+        return Color(white: hovering ? 0.52 : 0.34)
+    }
 
     var body: some View {
         Button(action: onTap) {
@@ -58,7 +71,7 @@ private struct RailChip: View {
                 Text(section.chipTitle)
                     .font(.system(size: 10.5, weight: isSelected ? .semibold : .regular))
             }
-            .foregroundStyle(isSelected ? Color.white : Color(white: hovering ? 0.72 : 0.55))
+            .foregroundStyle(tint)
             .padding(.horizontal, horizontalPadding)
             .frame(height: 20)
             .background(
@@ -79,9 +92,24 @@ private struct RailChip: View {
 struct IslandRail: View {
     @ObservedObject var model: IslandModel
 
-    private var live: [IslandSection] {
-        model.visibleSections.compactMap { IslandSectionRegistry.section($0) }
+    /// EVERY registered section, not only the ones with state.
+    ///
+    /// The rail used to list only what was live, so a quiet machine showed
+    /// one chip and the panel read like the panel it had always been. The
+    /// user asked for the opposite — "показывай все вкладки которые есть" —
+    /// and he is right about the thing the old rule cost: a tab that only
+    /// appears once it has something to say is a tab you cannot find on
+    /// purpose, and cannot learn exists. Discoverability beat tidiness.
+    ///
+    /// What survives of the old rule is the DIMMING: a section with nothing
+    /// to report is drawn quiet, so the rail still says at a glance where
+    /// something is happening. Registration order is rail order.
+    private var all: [IslandSection] {
+        IslandSectionRegistry.sections
     }
+
+    /// Which of them actually have something to show right now.
+    private var liveIDs: Set<IslandSectionID> { Set(model.visibleSections) }
 
     /// Horizontal padding inside each chip, as a function of how many
     /// chips the rail is holding.
@@ -108,23 +136,19 @@ struct IslandRail: View {
     static func chipPadding(chips: Int) -> CGFloat { chips >= 6 ? 6 : 9 }
 
     var body: some View {
-        let padding = Self.chipPadding(chips: live.count)
+        let padding = Self.chipPadding(chips: all.count)
         HStack(spacing: 4) {
-            if live.count <= 1 {
-                if let only = live.first {
-                    Text(only.chipTitle.uppercased())
-                        .font(.system(size: 9.5, weight: .semibold))
-                        .foregroundStyle(Color(white: 0.55))
-                        .tracking(0.6)
-                        .padding(.horizontal, 3)
-                }
-            } else {
-                ForEach(live) { section in
-                    RailChip(section: section,
-                             isSelected: section.id == model.selectedSection,
-                             horizontalPadding: padding,
-                             onTap: { model.select(section.id) })
-                }
+            // The single-section shortcut that drew a plain uppercase title
+            // is gone with the live-only rule: every section is always
+            // listed, so there is always more than one chip and the branch
+            // was unreachable. Its point — that a quiet panel should not
+            // look like a control surface — now lives in the dimming.
+            ForEach(all) { section in
+                RailChip(section: section,
+                         isSelected: section.id == model.selectedSection,
+                         isLive: liveIDs.contains(section.id),
+                         horizontalPadding: padding,
+                         onTap: { model.select(section.id) })
             }
             Spacer(minLength: 0)
         }

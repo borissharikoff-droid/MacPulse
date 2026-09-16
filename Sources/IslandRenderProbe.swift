@@ -303,8 +303,17 @@ enum IslandRenderProbe {
             print("could not render the panel"); exit(1)
         }
         write(panel, to: dir + "/expanded.png")
-        print("    sections in the rail: "
-              + model.visibleSections.map(\.rawValue).joined(separator: ", "))
+        // THE RAIL DRAWS EVERY REGISTERED SECTION, live or not — so this
+        // line has to report the registry and mark which ones are live,
+        // not report `visibleSections` and call it "the rail". It did
+        // exactly that until the rail changed underneath it, which made
+        // a true statement about the model read as a false one about the
+        // screen: it said "memory, sound" while six chips were drawn.
+        let liveIDs = Set(model.visibleSections)
+        print("    chips in the rail: "
+              + IslandSectionRegistry.sections
+                    .map { $0.id.rawValue + (liveIDs.contains($0.id) ? "" : " (тихо)") }
+                    .joined(separator: ", "))
         print("    selected: \(model.selectedSection)")
         print("    shelf: \(model.clipboard.items.count) chips of "
               + "\(ClipboardShelfState.slots) — "

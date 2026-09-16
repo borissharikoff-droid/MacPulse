@@ -140,6 +140,22 @@ struct ClipboardShelfItem: Equatable, Identifiable {
     /// condition. A chip that cannot be dragged must not offer a click
     /// that silently does nothing either.
     let isLive: Bool
+
+    /// The picture, for an image entry. Decoded ONCE when the clipboard
+    /// moves — never in a view body, which can be evaluated many times per
+    /// update.
+    ///
+    /// Compared BY IDENTITY below, exactly as `AppRowState` compares its
+    /// app icon: the same entry yields the same object, so it cannot
+    /// falsify the "would this draw the same pixels" test that decides
+    /// whether the shelf republishes at all.
+    let thumbnail: NSImage?
+
+    static func == (a: ClipboardShelfItem, b: ClipboardShelfItem) -> Bool {
+        a.id == b.id && a.symbol == b.symbol && a.kind == b.kind
+            && a.preview == b.preview && a.size == b.size && a.time == b.time
+            && a.isLive == b.isLive && a.thumbnail === b.thumbnail
+    }
 }
 
 /// Everything the shelf draws, as drawn.
@@ -284,12 +300,21 @@ final class ClipboardFeature {
         case .image:    kind = "картинка"; symbol = "photo"
         }
 
-        // An image's preview IS its pixel size (the engine never retains
-        // image bytes, so there is nothing else to show). When the header
-        // could not be parsed the engine hands back an empty string — that
-        // is "could not measure", and it renders as the dash, not as a
-        // made-up dimension.
+        // An image's text preview is its pixel size, which is what the chip
+        // shows only when the PICTURE could not be built. When the header
+        // could not be parsed either, the engine hands back an empty string
+        // — that is "could not measure", and it renders as the dash, not as
+        // a made-up dimension.
         let preview = e.preview.isEmpty ? "—" : e.preview
+
+        // THE PICTURE ITSELF, when there is one. Decoded here rather than
+        // in the view body: a body can be evaluated many times per update
+        // and NSImage(data:) is not free, while this runs once per real
+        // clipboard change. Compared by identity in `Equatable`, the same
+        // way AppRowState compares its app icon, so it never falsifies the
+        // "would draw the same pixels" test that decides whether to
+        // republish at all.
+        let thumbnail = e.thumbnailPNG.flatMap { NSImage(data: $0) }
 
         return ClipboardShelfItem(id: e.id,
                                   symbol: symbol,
@@ -297,7 +322,8 @@ final class ClipboardFeature {
                                   preview: preview,
                                   size: UIFmt.bytes(e.byteCount.map(Double.init)),
                                   time: clock.string(from: e.capturedAt),
-                                  isLive: e.canRecopy)
+                                  isLive: e.canRecopy,
+                                  thumbnail: thumbnail)
     }
 }
 
@@ -508,10 +534,28 @@ private struct ShelfChip: View {
                 .fill(Color.white.opacity(item.isLive ? (hovering ? 0.14 : 0.07) : 0.035))
 
             HStack(spacing: ShelfChipMetrics.glyphTextGap) {
-                Image(systemName: item.symbol)
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color(white: item.isLive ? 0.62 : 0.32))
-                    .frame(width: ShelfChipMetrics.glyphWidth)
+                // THE PICTURE WHERE THERE IS ONE, the glyph otherwise.
+                //
+                // It occupies exactly the glyph's slot rather than widening
+                // the chip: the shelf's five-chip arithmetic lives in
+                // IslandMetrics and a picture that changed the width would
+                // silently reflow the whole row. `.fill` crops to the slot
+                // so a panorama and a portrait both read as "this picture"
+                // at a glance, which is all a 14 pt square can honestly do.
+                if let thumb = item.thumbnail {
+                    Image(nsImage: thumb)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: ShelfChipMetrics.glyphWidth,
+                               height: ShelfChipMetrics.glyphWidth)
+                        .clipShape(RoundedRectangle(cornerRadius: 2.5, style: .continuous))
+                        .opacity(item.isLive ? 1 : 0.4)
+                } else {
+                    Image(systemName: item.symbol)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color(white: item.isLive ? 0.62 : 0.32))
+                        .frame(width: ShelfChipMetrics.glyphWidth)
+                }
 
                 Text(item.preview)
                     .font(.system(size: 10.5))
