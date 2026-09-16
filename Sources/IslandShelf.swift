@@ -245,13 +245,19 @@ final class ClipboardFeature {
 
     // MARK: Actions the shelf calls
 
-    /// A CLICK on a chip. The engine promotes the entry and publishes;
-    /// nothing to do here on either outcome. A false return means the
-    /// payload was never retained, and such chips are drawn inert in the
-    /// first place.
-    func recopy(_ id: UInt64) {
+    /// A CLICK on a chip. The engine promotes the entry and publishes.
+    ///
+    /// THE RESULT IS FORWARDED, and it used to be swallowed on the grounds
+    /// that a false return only happens for chips that are drawn inert
+    /// anyway. That stopped being true enough the moment the chip started
+    /// SAYING «Скопировано»: an image whose spooled file the OS cleared
+    /// between draw and click is live-looking and still refuses, and
+    /// confirming a copy that did not happen is the one failure this
+    /// label exists to prevent.
+    @discardableResult
+    func recopy(_ id: UInt64) -> Bool {
         precondition(Thread.isMainThread)
-        ClipboardEngine.shared.recopy(id: id)
+        return ClipboardEngine.shared.recopy(id: id)
     }
 
     func clearHistory() {
@@ -517,6 +523,13 @@ private struct ShelfChip: View {
     let width: CGFloat
 
     @State private var hovering = false
+    /// Shows «Скопировано» in place of the preview for a beat after a
+    /// successful click. Per-chip and short-lived, so it stays local.
+    @State private var justCopied = false
+    /// Cancelled and replaced on every click, so clicking the same chip
+    /// twice quickly re-arms the label instead of letting the first
+    /// timer clear it while the second click is still fresh.
+    @State private var copyResetTask: DispatchWorkItem?
 
     /// The detail that does not fit on a 101 pt chip. A tooltip is not
     /// words on the panel: it costs nothing until the pointer stops.
@@ -557,9 +570,25 @@ private struct ShelfChip: View {
                         .frame(width: ShelfChipMetrics.glyphWidth)
                 }
 
-                Text(item.preview)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Color(white: item.isLive ? 0.88 : 0.45))
+                // The chip says «Скопировано» for a beat after a click.
+                //
+                // Clicking put the entry back on the system clipboard and
+                // said NOTHING — the one affordance here whose whole result
+                // is invisible, since the clipboard has no appearance. A
+                // drag at least moves something across the screen; a click
+                // looked identical whether it worked, silently refused
+                // (an inert chip), or never registered at all.
+                //
+                // Local @State, deliberately: this is per-chip, lives for
+                // 1.2 s, and belongs to nobody else. Routing it through
+                // IslandModel would republish the whole shelf to animate
+                // one word — the publishing rule at the top of
+                // IslandModel.swift is exactly about not doing that.
+                Text(justCopied ? "Скопировано" : item.preview)
+                    .font(.system(size: 10.5, weight: justCopied ? .semibold : .regular))
+                    .foregroundStyle(justCopied
+                                     ? IslandPalette.normal
+                                     : Color(white: item.isLive ? 0.88 : 0.45))
                     .lineLimit(1)
                     .truncationMode(.tail)
 
@@ -573,7 +602,25 @@ private struct ShelfChip: View {
             // which gesture is in progress.
             ShelfChipDragSurface(item: item,
                                  dragImage: Self.dragImage(item, width: width),
-                                 onClick: { ClipboardFeature.shared.recopy(item.id) },
+                                 onClick: {
+                                     // CONFIRM ONLY WHAT ACTUALLY HAPPENED.
+                                     // `recopy` returns false when the
+                                     // payload is gone — an over-budget copy,
+                                     // or an image whose spooled file the OS
+                                     // cleared. Saying «Скопировано» then
+                                     // would be the exact lie this label
+                                     // exists to prevent, so the chip stays
+                                     // silent and the tooltip already
+                                     // explains why it is inert.
+                                     guard ClipboardFeature.shared.recopy(item.id) else { return }
+                                     withAnimation(.easeOut(duration: 0.12)) { justCopied = true }
+                                     copyResetTask?.cancel()
+                                     let task = DispatchWorkItem {
+                                         withAnimation(.easeIn(duration: 0.2)) { justCopied = false }
+                                     }
+                                     copyResetTask = task
+                                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: task)
+                                 },
                                  onHover: { hovering = $0 })
         }
         .frame(width: width, height: IslandMetrics.shelfChipHeight)
