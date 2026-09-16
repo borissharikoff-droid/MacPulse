@@ -78,6 +78,13 @@ enum IslandFeatures {
         // IslandSectionTunnel.swift.
         IslandSectionRegistry.register(.tunnel)
 
+        // The AI-coding session the user is in, read from VibeHub's own
+        // local ~/.vibehub/status.json — never from its server. Its chip is
+        // absent unless that file is FRESH (120 s) and describes a running
+        // session, which on a machine without VibeHub is never. Registers
+        // and starts in one call — see IslandSectionVibe.swift for why.
+        VibeFeature.shared.register()
+
         // NOT A SECTION, ON PURPOSE: the mic/camera privacy readout. It is
         // one clause in the panel footer and nothing else. It gets no tab
         // because a tab is something you navigate TO, and it no longer gets
