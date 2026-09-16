@@ -83,9 +83,17 @@ import Foundation
 //     fetched, never validated, never previewed. Linking is unchanged —
 //     AppKit + Foundation, both already in build.sh. No new -framework
 //     flag, and `otool -L` stays free of CFNetwork / Network / Security.
-//   * no file deletion, no process termination
-//   * IN-MEMORY ONLY. Nothing here writes to disk. See the block at the
-//     bottom of the file before adding any persistence.
+//   * no process termination
+//   * NO HISTORY FILE. The history itself is in memory and dies with the
+//     process — see the block at the bottom of the file before adding any
+//     persistence. The ONE thing that reaches disk is a copied IMAGE's
+//     ORIGINAL bytes, spooled to NSTemporaryDirectory() so the shelf can
+//     drag a real file out of the panel. `ClipboardImageStore` says where,
+//     why it is NOT ~/Library/Caches, what the cap is, and when it is
+//     wiped. A thumbnail of a few KB is what stays in memory.
+//   * deletion ONLY of files this engine itself wrote, inside its own
+//     subdirectory of NSTemporaryDirectory(), re-verified before each
+//     unlink the same way Maintenance.swift verifies its own roots.
 //   * every measured value is Optional; nil means "could not measure"
 //     and renders as a dash — never as a fabricated 0.
 //   * sampling happens off the main thread; results are published to the
@@ -171,8 +179,8 @@ struct ClipboardEntry: Sendable, Identifiable, Equatable {
 
     /// How many bytes THIS PROCESS is holding for the entry. Always
     /// measurable, because it is our own accounting, not a probe. For an
-    /// image, or an oversized item, this is just the preview string — the
-    /// payload was deliberately not retained.
+    /// image this is the preview, the temp-file path and the THUMBNAIL —
+    /// never the original pixels, which went to disk.
     let retainedBytes: Int
 
     /// When it was captured (or last re-promoted by a duplicate copy or a
@@ -193,11 +201,28 @@ struct ClipboardEntry: Sendable, Identifiable, Equatable {
     /// Number of file URLs, `.fileURLs` only; `nil` otherwise.
     let fileCount: Int?
 
-    /// False when the payload was not retained (an image, or an item over
-    /// `Budget.payloadBytesPerEntry`). `recopy` on such an entry returns
+    /// A DOWNSAMPLED PNG/JPEG of a copied image, about
+    /// `Budget.thumbnailPixels` on the long edge — a few KB, which is what
+    /// the shelf chip draws instead of the `photo` glyph and what the drag
+    /// preview shows. `nil` = not an image, or the header could not be
+    /// decoded, which renders as the glyph again rather than as a blank
+    /// box.
+    ///
+    /// This is NOT the payload. It is a derived, deliberately lossy
+    /// picture small enough to live inside the memory budget; the original
+    /// bytes are on disk (`ClipboardPayload.imageFile`) and never in RAM.
+    let thumbnailPNG: Data?
+
+    /// False when there is nothing to put back: an over-budget text copy,
+    /// or an image whose spooled file is gone (the disk cap evicted it, or
+    /// the OS cleared /var/folders). `recopy` on such an entry returns
     /// false rather than putting a truncated body on the pasteboard, and
-    /// the row is drawn unclickable so the user is never offered a control
-    /// that cannot work.
+    /// the chip is drawn inert so the user is never offered a control that
+    /// cannot work.
+    ///
+    /// AN IMAGE IS NORMALLY TRUE NOW. It was false for as long as the
+    /// engine kept nothing but dimensions; it holds a file path today, so
+    /// both affordances work and `draggingWriters` hands out a real file.
     let canRecopy: Bool
 
     /// The bytes. `fileprivate` on purpose — see the type comment.
@@ -238,6 +263,14 @@ struct ClipboardStats: Sendable, Equatable {
     var deduplicated: Int = 0
     /// Entries dropped by the entry-count or byte budget.
     var evicted: Int = 0
+    /// Bytes this process is holding ON DISK for copied images, right now.
+    /// Our own accounting of our own spool, so a measured zero is a real
+    /// zero.
+    var imageBytesOnDisk: Int = 0
+    /// Image files unlinked by the DISK cap while their entry stayed in
+    /// history. Such an entry keeps its thumbnail and loses its drag —
+    /// counted separately from `evicted`, which drops the whole row.
+    var imageFilesDropped: Int = 0
     /// Last `changeCount` this engine consumed. `nil` before the first
     /// poll — we have genuinely not measured it yet.
     var lastChangeCount: Int?
@@ -259,8 +292,19 @@ fileprivate enum ClipboardPayload: Sendable {
     case richText(rtf: Data, plain: String)
     case url(String)
     case fileURLs([String])
-    /// Nothing retained: an image, or an item over the per-entry cap. The
-    /// entry exists and its metadata is real, but it cannot be put back.
+    /// A COPIED IMAGE. The original bytes are in a temp file this engine
+    /// wrote; what the entry holds is the path, the pasteboard type they
+    /// were read as, and how big they are. Roughly 100 bytes of RAM for a
+    /// 4 MB screenshot, which is the whole reason images can be dragged at
+    /// all on a machine this feature is not allowed to load.
+    ///
+    /// The file can VANISH — the disk cap unlinks the oldest, and
+    /// /var/folders is the OS's to clear. Every reader treats a missing
+    /// file as "this entry is no longer draggable", never as an error.
+    case imageFile(path: String, type: String, bytes: Int)
+    /// Nothing retained: an item over the per-entry cap, or an image whose
+    /// bytes could not be spooled. The entry exists and its metadata is
+    /// real, but it cannot be put back.
     case notRetained
 
     var retainedBytes: Int {
@@ -269,8 +313,55 @@ fileprivate enum ClipboardPayload: Sendable {
         case .richText(let d, let p): return d.count + p.utf8.count
         case .url(let s):             return s.utf8.count
         case .fileURLs(let a):        return a.reduce(0) { $0 + $1.utf8.count + 8 }
+        case .imageFile(let p, _, _): return p.utf8.count
         case .notRetained:            return 0
         }
+    }
+
+    /// The temp file this payload owns, if any. The one place that answers
+    /// "what must be unlinked when this entry goes away".
+    var imageFilePath: String? {
+        if case .imageFile(let p, _, _) = self { return p }
+        return nil
+    }
+
+    /// On-disk bytes this payload is responsible for.
+    var diskBytes: Int {
+        if case .imageFile(_, _, let n) = self { return n }
+        return 0
+    }
+}
+
+/// `ClipboardEntry` is `let`-only on purpose — an entry is a value, not a
+/// record you edit — so every change is a new entry. These two are the only
+/// changes anything makes, and they were three copies of a fourteen-field
+/// initialiser before they were named.
+extension ClipboardEntry {
+
+    /// Same entry, re-dated. Used when a duplicate copy or a `recopy`
+    /// promotes an existing entry back to the front.
+    fileprivate func promoted(at when: Date) -> ClipboardEntry {
+        ClipboardEntry(id: id, kind: kind, preview: preview, byteCount: byteCount,
+                       retainedBytes: retainedBytes, capturedAt: when,
+                       sourceApplication: sourceApplication,
+                       pixelWidth: pixelWidth, pixelHeight: pixelHeight,
+                       fileCount: fileCount, thumbnailPNG: thumbnailPNG,
+                       canRecopy: canRecopy, payload: payload, fingerprint: fingerprint)
+    }
+
+    /// Same entry with its spooled original gone: no drag, no re-copy, but
+    /// STILL DRAWN, thumbnail and all, so the user can see what he copied.
+    /// Both ways of getting here are expected — the disk cap unlinking the
+    /// oldest file, and the OS clearing /var/folders under us — so this is
+    /// a degrade, not an error, and never a crash.
+    fileprivate func withoutImageFile() -> ClipboardEntry {
+        ClipboardEntry(id: id, kind: kind, preview: preview, byteCount: byteCount,
+                       retainedBytes: retainedBytes - payload.retainedBytes,
+                       capturedAt: capturedAt,
+                       sourceApplication: sourceApplication,
+                       pixelWidth: pixelWidth, pixelHeight: pixelHeight,
+                       fileCount: fileCount, thumbnailPNG: thumbnailPNG,
+                       canRecopy: false, payload: .notRetained, fingerprint: fingerprint)
     }
 }
 
@@ -356,6 +447,54 @@ final class ClipboardEngine {
         /// with `pixelWidth == nil` — "could not measure" — rather than
         /// spending the memory.
         static let imageInspectBytes = 64 * 1024 * 1024
+
+        // --- THE IMAGE THUMBNAIL (memory) --------------------------------
+        //
+        // The chip draws an 18 pt square and the drag preview is at most
+        // 80 pt on the long edge, so 160 px covers both at 2x with nothing
+        // to spare and nothing wasted.
+
+        /// Long edge of the retained thumbnail, in PIXELS.
+        static let thumbnailPixels = 160
+
+        /// Encode as PNG first; if the PNG lands above this, re-encode as
+        /// JPEG instead. A flat UI screenshot PNGs to ~4-10 KB at 160 px;
+        /// a photograph does not, and 40 KB x 100 entries would eat the
+        /// whole 2 MiB history budget on thumbnails alone.
+        static let thumbnailPreferredBytes = 16 * 1024
+
+        /// And if even the JPEG is bigger than this, keep no thumbnail.
+        /// The chip falls back to the `photo` glyph, which is what it drew
+        /// before this feature existed.
+        static let thumbnailMaxBytes = 64 * 1024
+
+        // --- THE IMAGE SPOOL (disk) --------------------------------------
+        //
+        // WHY THESE TWO NUMBERS. This is temp space under /var/folders, so
+        // the scarce resource is not the disk — it is how much of the
+        // user's copied imagery is lying around unencrypted between
+        // launches, and how long the launch wipe takes.
+        //
+        //   16 MiB per file. A 6K Retina screenshot PNG measures 2-8 MB;
+        //   16 MiB is comfortably past the largest real one and still
+        //   small enough that reading it back at drag time is a transient
+        //   this machine does not notice. Above it the entry degrades to
+        //   metadata + thumbnail, i.e. exactly what every image did before.
+        //
+        //   64 MiB total. At the 1-5 MB a real screenshot weighs that is
+        //   13-64 images — far more than the FIVE the shelf ever shows,
+        //   and more than the 100-entry history could be made of. So in
+        //   normal use the cap never bites; it exists so that a script
+        //   copying images in a loop cannot fill a disk. It is also small
+        //   enough that wiping it at launch is a handful of unlinks.
+
+        /// One spooled image may not exceed this.
+        static let imageFileBytesPerEntry = 16 * 1024 * 1024   // 16_777_216
+
+        /// All spooled images together may not exceed this. Oldest file
+        /// out first; its entry survives, with the thumbnail, minus the
+        /// drag.
+        static let imageFileBytesTotal = 64 * 1024 * 1024      // 67_108_864
     }
 
     // MARK: - The secret filter
@@ -444,30 +583,62 @@ final class ClipboardEngine {
 
     private let pasteboard: NSPasteboard
 
+    /// Where copied images' original bytes go. See `ClipboardImageStore`
+    /// for where that is and why it is emphatically not ~/Library/Caches.
+    /// Readable so `--clipboard-probe` can look in the directory and count
+    /// what is really there instead of trusting the engine's own numbers.
+    let imageStore: ClipboardImageStore
+
     /// `shared` uses `NSPasteboard.general`. The initialiser takes a
     /// pasteboard so a harness can drive a PRIVATE named pasteboard
     /// instead of clobbering the user's real clipboard — that is not
     /// hypothetical tidiness: an earlier spike of this feature destroyed
     /// the contents of this machine's clipboard, and this parameter is how
     /// the behaviour proof avoids doing it again.
+    ///
+    /// THE IMAGE SPOOL FOLLOWS THE PASTEBOARD, for the same reason and
+    /// with no second parameter to forget: an engine on a private board is
+    /// a harness, and a harness gets its own temp subdirectory. Otherwise
+    /// running `--clipboard-probe` or `--render-probe` while MacPulse is
+    /// up would wipe the RUNNING app's images at `start()` — the same
+    /// class of mistake as clobbering the clipboard, one level down.
     init(pasteboard: NSPasteboard = .general) {
         self.pasteboard = pasteboard
+        self.imageStore = ClipboardImageStore(
+            name: pasteboard.name == .general
+                ? ClipboardImageStore.defaultDirectoryName
+                : ClipboardImageStore.harnessDirectoryName(for: pasteboard.name.rawValue))
     }
 
     // MARK: - Lifecycle
 
     /// Take the baseline `changeCount` so the item already sitting on the
-    /// clipboard at launch is NOT retroactively captured. Call from main.
-    /// Idempotent.
+    /// clipboard at launch is NOT retroactively captured, and WIPE THE
+    /// IMAGE SPOOL. Call from main. Idempotent.
+    ///
+    /// THE WIPE IS THE POINT OF CALLING THIS FIRST. History is in memory,
+    /// so a crash loses it — but the spooled images are files, and without
+    /// this line a crash would leave the user's copied screenshots on disk
+    /// until the OS got round to /var/folders, which can be days. Every
+    /// launch therefore starts from an empty directory, and the only
+    /// images on disk at any moment are the ones this process put there
+    /// for entries it is still holding.
+    ///
+    /// Guarded on the FIRST call only: `start()` is idempotent and a
+    /// second call must not unlink files live entries are pointing at.
     func start() {
         let current = pasteboard.changeCount
         lock.lock()
-        if lastChangeCount == nil {
+        let isFirstStart = (lastChangeCount == nil)
+        if isFirstStart {
             lastChangeCount = current
             liveStats.lastChangeCount = current
         }
         let snapshot = refreshTotalsLocked()
         lock.unlock()
+        // Outside the lock: this is file I/O, and `lock` is the one main
+        // thread and sampling queue share.
+        if isFirstStart { imageStore.wipe() }
         publish(snapshot)
     }
 
@@ -598,6 +769,10 @@ final class ClipboardEngine {
         var pixelWidth: Int?
         var pixelHeight: Int?
         var fileCount: Int?
+        /// Images only, and derived at capture time because the original
+        /// bytes are handed to `ClipboardImageStore` and then dropped —
+        /// there is no second chance to look at them.
+        var thumbnailPNG: Data?
     }
 
     private func readCandidate(items: [NSPasteboardItem],
@@ -772,6 +947,7 @@ final class ClipboardEngine {
                                       pixelWidth: promoted.pixelWidth,
                                       pixelHeight: promoted.pixelHeight,
                                       fileCount: promoted.fileCount,
+                                      thumbnailPNG: promoted.thumbnailPNG,
                                       canRecopy: promoted.canRecopy,
                                       payload: promoted.payload,
                                       fingerprint: promoted.fingerprint)
@@ -798,6 +974,7 @@ final class ClipboardEngine {
                                    pixelWidth: c.pixelWidth,
                                    pixelHeight: c.pixelHeight,
                                    fileCount: c.fileCount,
+                                   thumbnailPNG: c.thumbnailPNG,
                                    canRecopy: {
                                        if case .notRetained = c.payload { return false }
                                        return true
@@ -945,6 +1122,25 @@ final class ClipboardEngine {
             pasteboard.clearContents()
             let urls = paths.map { URL(fileURLWithPath: $0) as NSURL }
             written = urls.isEmpty ? false : pasteboard.writeObjects(urls)
+        case .imageFile(let path, let type, _):
+            // The spooled file may be gone — the disk cap evicted it, or
+            // the OS cleared /var/folders — so ask before promising.
+            // Failing here is correct and visible: `recopy` returns false
+            // and the chip is already drawn inert.
+            guard imageStore.isAvailable(path: path),
+                  let data = FileManager.default.contents(atPath: path) else { return false }
+            pasteboard.clearContents()
+            let item = NSPasteboardItem()
+            // BOTH representations, because the two things a user does
+            // with a copied image want different ones: pasting into a
+            // document wants the pixels, dropping into Finder or a chat
+            // wants a file. Writing only the image data would silently
+            // turn a screenshot back into a paste-only clipboard entry,
+            // which is the behaviour this whole feature exists to fix.
+            item.setData(data, forType: NSPasteboard.PasteboardType(type))
+            item.setString(URL(fileURLWithPath: path).absoluteString,
+                           forType: NSPasteboard.PasteboardType(ClipboardTypes.fileURL))
+            written = pasteboard.writeObjects([item])
         }
 
         let produced = pasteboard.changeCount
@@ -960,7 +1156,8 @@ final class ClipboardEngine {
                                retainedBytes: e.retainedBytes, capturedAt: Date(),
                                sourceApplication: e.sourceApplication,
                                pixelWidth: e.pixelWidth, pixelHeight: e.pixelHeight,
-                               fileCount: e.fileCount, canRecopy: e.canRecopy,
+                               fileCount: e.fileCount, thumbnailPNG: e.thumbnailPNG,
+                               canRecopy: e.canRecopy,
                                payload: e.payload, fingerprint: e.fingerprint)
             store.insert(e, at: 0)
         }
@@ -1037,6 +1234,21 @@ final class ClipboardEngine {
             // string drops as the TEXT of the path, which is exactly the
             // failure this shelf exists to avoid.
             return paths.map { URL(fileURLWithPath: $0) as NSURL }
+        case .imageFile(let path, _, _):
+            // A FILE URL, not the pixels — which is the entire reason the
+            // original bytes were spooled to disk instead of held in RAM.
+            // Dropping this on Telegram or Finder produces a real .png the
+            // receiver can name, forward and save; dropping image data
+            // would produce an anonymous pasted picture, and a 5 MB
+            // screenshot would have had to sit in memory to do it.
+            //
+            // Checked at DRAG TIME, deliberately: /var/folders is cleared
+            // on the OS's own schedule, so a file that existed when the
+            // chip was drawn can be gone by the time it is dragged.
+            // Returning nil here aborts the session cleanly, which is far
+            // better than starting a drag that delivers nothing.
+            guard imageStore.isAvailable(path: path) else { return nil }
+            return [URL(fileURLWithPath: path) as NSURL]
         }
     }
 

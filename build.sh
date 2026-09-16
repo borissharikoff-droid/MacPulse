@@ -132,12 +132,24 @@ if BAD=$(grep -nE "$BANNED_EVERYWHERE" "$ROOT"/Sources/*.swift | grep -vE ':[0-9
   echo "$BAD" >&2
   exit 1
 fi
-# URLSession: Sources/Updater.swift and nowhere else.
+# URLSession: exactly TWO files, and each may name only its own one host.
+#
+#   Sources/Updater.swift    -> GitHub, to find and fetch a newer release
+#   Sources/GeoLookup.swift  -> www.cloudflare.com, to answer "what IP does the
+#                               world see me on", which on a machine behind a
+#                               tunnel is the only honest form of that question
+#
+# Two is not "one, rounded up". Each file is pinned to its own allow-list by
+# guard 2 below, so widening this sweep does NOT widen where either file can
+# reach. Adding a third would mean adding a third allow-list and writing down
+# what it buys — which is the point.
 if BAD=$(grep -nE 'URLSession|URLRequest|URLCredential|URLProtocol' "$ROOT"/Sources/*.swift \
          | grep -vE ':[0-9]+:[[:space:]]*//' \
-         | grep -v '/Updater\.swift:'); then
-  echo "error: CONTRACT — URLSession outside Sources/Updater.swift. Exactly one file in" >&2
-  echo "       MacPulse may talk to the network, and it may only talk to GitHub." >&2
+         | grep -v '/Updater\.swift:' \
+         | grep -v '/GeoLookup\.swift:'); then
+  echo "error: CONTRACT — URLSession outside Sources/{Updater,GeoLookup}.swift." >&2
+  echo "       Exactly two files in MacPulse may talk to the network, and each may" >&2
+  echo "       only reach the one host on its own allow-list." >&2
   echo "$BAD" >&2
   exit 1
 fi
@@ -187,40 +199,60 @@ if [ ! -f "$UPDATER_SRC" ]; then
   echo "       CFNetwork) and update the contract block at the top of this file." >&2
   exit 1
 fi
-ALLOWED_HOSTS='api.github.com github.com objects.githubusercontent.com'
-BAD_HOSTS=""
-while IFS= read -r literal; do
-  [ -n "$literal" ] || continue
-  host="${literal#*://}"        # drop the scheme
-  host="${host%%/*}"            # drop the path
-  host="${host%%\?*}"
-  host="${host%%#*}"
-  host="$(printf '%s' "$host" | tr 'A-Z' 'a-z')"
-  ok=""
-  for allowed in $ALLOWED_HOSTS; do
-    [ "$host" = "$allowed" ] && ok=1
-  done
-  [ -n "$ok" ] || BAD_HOSTS="$BAD_HOSTS  $literal   -> host '$host'"$'\n'
-done < <(grep -oE 'https?://[^"'"'"'[:space:]]*' "$UPDATER_SRC" || true)
-if [ -n "$BAD_HOSTS" ]; then
-  echo "error: CONTRACT — Sources/Updater.swift names a host that is not GitHub." >&2
-  echo "       Allowed: $ALLOWED_HOSTS" >&2
-  echo "       The owner/repo may be interpolated into the PATH, NEVER into the host." >&2
-  printf '%s' "$BAD_HOSTS" >&2
+GEO_SRC="$ROOT/Sources/GeoLookup.swift"
+if [ ! -f "$GEO_SRC" ]; then
+  echo "error: CONTRACT — Sources/GeoLookup.swift is missing. If the public-IP" >&2
+  echo "       readout was deliberately removed, narrow the URLSession sweep above" >&2
+  echo "       back to Updater.swift alone and update the contract block at the top." >&2
   exit 1
 fi
-# ...and the allow-list must be doing work, not passing vacuously. A file with
-# no http literal at all passes the loop above, which is exactly what you get
-# if someone replaces the spelled-out API URL with a string built at runtime —
-# the one shape this guard exists to stop. So require the literal to be there.
-if ! grep -q 'https://api\.github\.com/' "$UPDATER_SRC"; then
-  echo "error: CONTRACT — Sources/Updater.swift no longer spells out an" >&2
-  echo "       https://api.github.com/ literal. Either the API endpoint moved (update" >&2
-  echo "       this check) or it is now being assembled at runtime, which is the whole" >&2
-  echo "       thing the host allow-list exists to prevent." >&2
-  exit 1
-fi
-echo "==> Contract OK: Updater.swift names only $ALLOWED_HOSTS."
+
+# Each networking file against its OWN allow-list, and each must still SPELL OUT
+# its endpoint. One shared list would mean the geo lookup could reach GitHub and
+# the updater could reach Cloudflare — neither has any business doing the other's
+# job, and a guard that permits more than it needs to is not a guard.
+check_hosts() {   # <file> <required-literal> <allowed host>...
+  local src="$1"; local required="$2"; shift 2
+  local bad=""
+  while IFS= read -r literal; do
+    [ -n "$literal" ] || continue
+    local host="${literal#*://}"   # drop the scheme
+    host="${host%%/*}"             # drop the path
+    host="${host%%\?*}"
+    host="${host%%#*}"
+    host="$(printf '%s' "$host" | tr 'A-Z' 'a-z')"
+    local ok=""
+    for allowed in "$@"; do
+      [ "$host" = "$allowed" ] && ok=1
+    done
+    [ -n "$ok" ] || bad="$bad  $literal   -> host '$host'"$'\n'
+  done < <(grep -oE 'https?://[^"'"'"'[:space:]]*' "$src" || true)
+  if [ -n "$bad" ]; then
+    echo "error: CONTRACT — $(basename "$src") names a host that is not on its" >&2
+    echo "       allow-list. Allowed: $*" >&2
+    echo "       Values may be interpolated into the PATH, NEVER into the host." >&2
+    printf '%s' "$bad" >&2
+    exit 1
+  fi
+  # ...and the allow-list must be doing work, not passing vacuously. A file with
+  # no http literal at all passes the loop above, which is exactly what you get
+  # if someone replaces the spelled-out URL with a string built at runtime — the
+  # one shape this guard exists to stop. So require the literal to be there.
+  if ! grep -q "$required" "$src"; then
+    echo "error: CONTRACT — $(basename "$src") no longer spells out its endpoint" >&2
+    echo "       literal ($required). Either the endpoint moved (update this check)" >&2
+    echo "       or it is being assembled at runtime, which is the whole thing the" >&2
+    echo "       host allow-list exists to prevent." >&2
+    exit 1
+  fi
+}
+
+check_hosts "$UPDATER_SRC" 'https://api\.github\.com/' \
+            api.github.com github.com objects.githubusercontent.com
+check_hosts "$GEO_SRC" 'https://www\.cloudflare\.com/cdn-cgi/trace' \
+            www.cloudflare.com
+
+echo "==> Contract OK: Updater.swift -> GitHub only; GeoLookup.swift -> www.cloudflare.com only."
 # Exactly one file is allowed to open a socket that can carry a byte anywhere.
 #
 # Sources/TunnelSampler.swift is the one exception, and it is a narrow one: a

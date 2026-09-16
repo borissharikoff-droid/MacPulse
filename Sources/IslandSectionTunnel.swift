@@ -31,6 +31,64 @@ import SwiftUI
 // failed toggle would drop the user offline with no reliable way back to
 // their own profile. The honest offer is to open the app they already
 // have. See the header of TunnelSampler.swift.
+//
+// ---------------------------------------------------------------------
+// WHAT THIS SECTION SAYS, AFTER THE CUT
+//
+// Two facts, and the user asked for exactly these two:
+//
+//     WHO CARRIES THE TRAFFIC        FlClashX · несёт трафик · utun6
+//     WHERE HE APPEARS TO BE         203.23.179.147 · DE · FRA
+//
+// Four sentences used to live on this panel and do not any more. Each of
+// them was TRUE and each of them was a paragraph on a 560 pt strip the
+// user reads in two seconds. They were cut on his instruction — "убери
+// весь лишний текст, читается из таблицы маршрут — это ничего не надо" —
+// said twice, about this section. The engineering behind every one of
+// them is intact and is still written down, in the place an engineer
+// actually looks:
+//
+//   THE DECOY LINE. «Маршрут по умолчанию — en0, и он обманка: трафик
+//     уходит через utun6.» WHY the default route lies — Clash never
+//     replaces 0.0.0.0/0, it installs eight more-specific splits that
+//     together cover every routable address — is the single biggest trap
+//     in this feature and is documented at length under "THE ONE IDEA" in
+//     TunnelSampler.swift. It belongs to whoever maintains the query, not
+//     to whoever glances at the panel. `defaultRouteInterface` is still
+//     sampled and still decides `deservesStripSlot`; it is simply no
+//     longer narrated.
+//
+//   THE NOT-AN-EXIT-ADDRESS DISCLAIMER. «адрес интерфейса 198.18.0.1 —
+//     это не адрес выхода.» Cut by DELETING THE ADDRESS, which is the
+//     better fix: 198.18.0.1 is an RFC 2544 benchmarking address that
+//     nobody needed on screen, and the disclaimer only existed because it
+//     was there. There is now exactly ONE IP on this panel and it is the
+//     real one — see GeoLookup.swift. A caveat you can delete by deleting
+//     what it warns about is a caveat that was never the answer.
+//
+//   THE STANDING NOTE. «Читается из таблицы маршрутов ядра, ни один пакет
+//     никуда не отправляется…» An assurance about the implementation,
+//     addressed to a reader who was not worried. Still true, still
+//     enforced — by build.sh's PF_ROUTE guard, which is a check and not a
+//     sentence.
+//
+//   THE IPv6 CAVEAT. «На машине есть глобальный IPv6, а замер идёт только
+//     по IPv4…» A real limitation of the engine and a genuine reason a
+//     v6-only tunnel could hide from it. It is an engineer's caveat, so it
+//     went where engineers are: `TunnelMetrics.hasGlobalIPv6` still
+//     carries it and `--tunnel-probe` still prints it.
+//
+//   AND THE CONFIDENCE ANNOTATION. «utun6 (по документации)» — the
+//     difference between a signature observed here and one read out of a
+//     vendor's PDF. `signatureConfidence` still records it and the probe
+//     still prints it; a tool row is four columns wide and had no room to
+//     argue with itself.
+//
+// WHAT SURVIVES IS NOT PROSE. The badges («НЕСЁТ ТРАФИК»,
+// «РАСЩЕПЛЁННЫЙ МАРШРУТ») are states, two words each. The tool rows are a
+// table. The launch caution is the one sentence left, and it appears only
+// in the moment the user has clicked «Открыть» on a tool that could
+// auto-connect — i.e. only when it is the thing he is doing.
 // =====================================================================
 
 extension IslandSectionID {
@@ -106,63 +164,44 @@ private enum TunnelWords {
         return carrier.isTunnel ? "НЕСЁТ ТРАФИК" : "ПРЯМОЕ СОЕДИНЕНИЕ"
     }
 
-    /// What the carrier actually is.
+    /// The carrier's interface, and its MTU because it is a number and not
+    /// a sentence.
     ///
-    /// The address is printed and immediately disclaimed. On a Clash
-    /// fake-ip tunnel the interface address AND the gateway are both
-    /// 198.18.0.1 — an RFC 2544 benchmarking address that is not a peer and
-    /// not an exit node. Rendering it as "your VPN's IP" would be the
-    /// second-biggest lie this feature could tell, after reading the
-    /// default route.
+    /// THE INTERFACE'S OWN IPv4 IS DELIBERATELY NOT HERE. On a Clash
+    /// fake-ip tunnel it is 198.18.0.1 — an RFC 2544 benchmarking address
+    /// that is not a peer and not an exit node — and the old line printed
+    /// it followed by a clause explaining that it was not an exit node.
+    /// Deleting the address deletes the need for the clause, and leaves
+    /// this panel with exactly one IP on it: the one the world actually
+    /// sees. `TunnelCarrier.ipv4` is still sampled, still in the tooltip's
+    /// `reason`, and still printed by `--tunnel-probe`.
     static func carrierDetail(_ m: TunnelMetrics) -> String {
-        guard let c = m.carrier else {
-            return "Интерфейс — · MTU — · таблица маршрутов не прочиталась"
-        }
-        var parts = ["Интерфейс \(c.interface)"]
-        parts.append("MTU " + (c.mtu.map { "\($0)" } ?? "—"))
-        if let ipv4 = c.ipv4 {
-            parts.append("адрес интерфейса \(ipv4) — это не адрес выхода")
-        }
-        return parts.joined(separator: " · ")
+        guard let c = m.carrier else { return "—" }
+        guard let mtu = c.mtu else { return c.interface }
+        return "\(c.interface) · MTU \(mtu)"
     }
 
-    /// THE DECOY, named out loud. This line is the feature.
-    static func decoyLine(_ m: TunnelMetrics) -> String {
-        guard let def = m.defaultRouteInterface else {
-            return "Маршрут по умолчанию — не удалось прочитать."
-        }
-        guard let c = m.carrier else {
-            return "Маршрут по умолчанию — \(def). Кто несёт трафик, не измерено."
-        }
-        if c.interface == def {
-            return "Маршрут по умолчанию — \(def), он же несёт трафик."
-        }
-        return "Маршрут по умолчанию — \(def), и он обманка: трафик уходит через \(c.interface)."
+    /// The address the world currently sees. A dash when we could not ask,
+    /// and a dash is the whole message — see GeoLookup.swift.
+    static func outsideAddress(_ g: GeoReading?) -> String {
+        g?.ip ?? "—"
+    }
+
+    /// Where that address appears to be: ISO country and the Cloudflare
+    /// edge that answered. Never invented, never geocoded further than the
+    /// endpoint itself went.
+    static func outsideWhere(_ g: GeoReading?) -> String {
+        guard let g else { return "—" }
+        let parts = [g.country, g.colo].compactMap { $0 }
+        return parts.isEmpty ? "—" : parts.joined(separator: " · ")
     }
 
     /// The trailing column of a tool row: which interface, if we can pin
-    /// one. A documented-only signature says so, because a range read out
-    /// of a vendor's docs and never seen here is not the same evidence as
-    /// utun6's measured 198.18.0.1.
-    static func interfaceDetail(_ status: TunnelToolStatus, in m: TunnelMetrics) -> String {
-        guard let name = status.attributedInterface else { return "—" }
-        let confidence = m.tunnels.first { $0.name == name }?.signatureConfidence
-        return confidence == .documented ? "\(name) (по документации)" : name
-    }
-
-    /// One line, and it says the most load-bearing caveat that currently
-    /// applies. The read-only note is the floor, not the ceiling.
-    static func standingNote(_ m: TunnelMetrics) -> String {
-        if m.routeIsSplit {
-            return "Пробы разошлись: разные адреса уходят разными интерфейсами, единого носителя нет — "
-                 + "выше показан ответ для первой пробы."
-        }
-        if m.hasGlobalIPv6 {
-            return "На машине есть глобальный IPv6, а замер идёт только по IPv4: туннель, работающий "
-                 + "только по v6, здесь был бы не виден."
-        }
-        return "Читается из таблицы маршрутов ядра, ни один пакет никуда не отправляется. Только статус — "
-             + "MacPulse не включает и не выключает туннели."
+    /// one. Just the name — the verified/documented distinction is real
+    /// but it is an engineer's distinction, and it is still on
+    /// `signatureConfidence` and still printed by `--tunnel-probe`.
+    static func interfaceDetail(_ status: TunnelToolStatus) -> String {
+        status.attributedInterface ?? "—"
     }
 
     /// The footer clause, shown only while some OTHER section is selected.
@@ -178,21 +217,31 @@ private enum TunnelWords {
 
 // MARK: - The 560 x 186 body
 //
-//   22  headline          tool name + badge
-//    4  gap
-//   13  carrier detail    interface, MTU, and what the address is NOT
-//   13  the decoy line    the default route, named as not-the-carrier
+//   22  headline          who carries it   |  right: interface · MTU
+//    6  gap
+//   26  СНАРУЖИ           the public IP    |  right: country · colo
 //    8  gap
 //    1  divider
 //    7  gap
 //   88  four tool rows    22 each, one per tool this engine can name
 //    6  gap
-//   18  note zone         read-only note, or the launch caution + confirm
+//   18  note zone         EMPTY, unless a launch is waiting for a yes
 //  ---
-//  180, inside the 186 the router hands over.
+//  182, inside the 186 the router hands over.
+//
+// Two lines above the divider where there used to be three, and the two
+// that are left are both answers rather than commentary. The note zone
+// holds its 18 pt whether or not anything is in it, so arming a launch
+// does not make the tool rows jump.
 
 private struct TunnelSectionView: View {
     @ObservedObject var model: IslandModel
+
+    /// The public address, asked for lazily and only while this section is
+    /// on screen. A second ObservableObject rather than a field on
+    /// IslandModel: nothing outside this body reads it, and IslandModel is
+    /// a shared file. See the class comment in GeoLookup.swift.
+    @ObservedObject private var geo = GeoLookup.shared
 
     /// The tool whose «Открыть» was clicked and whose `launchCaution` is
     /// still waiting for a yes. Nothing is launched while this is set.
@@ -220,6 +269,19 @@ private struct TunnelSectionView: View {
                height: IslandMetrics.bodyHeight,
                alignment: .top)
         .padding(.horizontal, IslandRouter.gutter)
+        // THE ONLY TRIGGER FOR THE ONE NETWORK CALL. SwiftUI runs this
+        // when this body enters the tree, which IslandRouter builds only
+        // while the panel is open and only for the SELECTED section — so
+        // "the user opened Туннель" and nothing else. Never at launch,
+        // never on the 1 Hz tick.
+        .onAppear { geo.sectionAppeared() }
+        .onDisappear { geo.sectionDisappeared() }
+        // A tunnel flipped while the user was watching. The public address
+        // is precisely the thing that just changed, so throw the cached
+        // answer away and ask again — that IS the feature.
+        .onChange(of: model.tunnel?.carrier?.interface) { _ in
+            geo.carrierChanged()
+        }
     }
 
     @ViewBuilder private func content(_ m: TunnelMetrics) -> some View {
@@ -237,31 +299,52 @@ private struct TunnelSectionView: View {
                 .padding(.vertical, 2)
                 .background(RoundedRectangle(cornerRadius: 4)
                     .fill(TunnelWords.headlineTint(m).opacity(0.14)))
-            Spacer(minLength: 8)
             if m.routeIsSplit {
                 Text("РАСЩЕПЛЁННЫЙ МАРШРУТ")
                     .font(.system(size: 9, weight: .semibold))
                     .tracking(0.5)
                     .foregroundStyle(IslandPalette.warning)
             }
+            Spacer(minLength: 8)
+
+            // The interface, on the same line as the tool that owns it.
+            Text(TunnelWords.carrierDetail(m))
+                .font(.system(size: 10.5).monospacedDigit())
+                .foregroundStyle(Color(white: 0.50))
+                .lineLimit(1)
         }
         .frame(height: 22)
 
-        Spacer(minLength: 0).frame(height: 4)
+        Spacer(minLength: 0).frame(height: 6)
 
-        // --- what the carrier actually is ---
-        Text(TunnelWords.carrierDetail(m))
-            .font(.system(size: 9.5).monospacedDigit())
-            .foregroundStyle(Color(white: 0.52))
-            .lineLimit(1)
-            .frame(height: 13, alignment: .leading)
+        // --- СНАРУЖИ: the address the world currently sees ---
+        //
+        // One word of label, because after deleting the interface address
+        // this is the only IP on the panel and it must be unmistakable
+        // which side of the tunnel it is on. Everything else this line
+        // could have said is in GeoLookup.swift.
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text("СНАРУЖИ")
+                .font(.system(size: 9, weight: .semibold))
+                .tracking(0.6)
+                .foregroundStyle(Color(white: 0.38))
 
-        // --- THE DECOY, named out loud ---
-        Text(TunnelWords.decoyLine(m))
-            .font(.system(size: 9.5))
-            .foregroundStyle(Color(white: 0.42))
-            .lineLimit(1)
-            .frame(height: 13, alignment: .leading)
+            Text(TunnelWords.outsideAddress(geo.reading))
+                .font(.system(size: 16, weight: .semibold).monospacedDigit())
+                .foregroundStyle(geo.reading?.ip == nil
+                                 ? Color(white: 0.40) : Color(white: 0.93))
+                .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            Text(TunnelWords.outsideWhere(geo.reading))
+                .font(.system(size: 12, weight: .medium))
+                .tracking(0.4)
+                .foregroundStyle(geo.reading == nil
+                                 ? Color(white: 0.40) : TunnelPalette.carrying)
+                .lineLimit(1)
+        }
+        .frame(height: 26)
 
         Spacer(minLength: 0).frame(height: 8)
 
@@ -276,7 +359,7 @@ private struct TunnelSectionView: View {
             ForEach(TunnelTool.allCases, id: \.self) { tool in
                 if let status = m.status(of: tool) {
                     TunnelToolRow(status: status,
-                                  detail: TunnelWords.interfaceDetail(status, in: m),
+                                  detail: TunnelWords.interfaceDetail(status),
                                   isArmed: armed == tool,
                                   onOpen: { open(status) })
                 }
@@ -291,6 +374,12 @@ private struct TunnelSectionView: View {
 
     // MARK: The note zone
 
+    /// EMPTY ALMOST ALWAYS, and that is the point. This used to hold a
+    /// standing note on every single frame — an assurance about the
+    /// implementation, addressed to a reader who was not worried. The 18 pt
+    /// are still reserved so that arming a launch does not shove the tool
+    /// rows upward, but nothing is drawn in them unless the user has just
+    /// clicked «Открыть» on a tool that could auto-connect.
     @ViewBuilder private func noteZone(_ m: TunnelMetrics) -> some View {
         if let tool = armed, let caution = tool.launchCaution {
             // THE CONFIRMATION. It is here and not in a sheet because the
@@ -315,11 +404,7 @@ private struct TunnelSectionView: View {
             }
             .frame(height: 18)
         } else {
-            Text(TunnelWords.standingNote(m))
-                .font(.system(size: 8.5))
-                .foregroundStyle(Color(white: 0.34))
-                .lineLimit(1)
-                .frame(height: 18, alignment: .leading)
+            Color.clear.frame(height: 18)
         }
     }
 
@@ -548,16 +633,21 @@ enum TunnelProbe {
         print("  \(TunnelWords.headline(m))   [\(TunnelWords.headlineBadge(m))]"
               + (m.routeIsSplit ? "   [РАСЩЕПЛЁННЫЙ МАРШРУТ]" : ""))
         print("  \(TunnelWords.carrierDetail(m))")
-        print("  \(TunnelWords.decoyLine(m))")
+        // The decoy explanation and the standing notes used to be printed
+        // here because they were on the panel. They are not on the panel
+        // any more — a panel is not documentation — so there is nothing
+        // to echo. WHY the default route is a decoy is still written
+        // down, in the comments of TunnelSampler where it belongs.
+        print("  \(TunnelWords.outsideAddress(GeoLookup.shared.reading))"
+              + "   \(TunnelWords.outsideWhere(GeoLookup.shared.reading))")
         print("  " + String(repeating: "-", count: 68))
         for tool in TunnelTool.allCases {
             guard let s = m.status(of: tool) else { continue }
             print("  " + pad(tool.displayName, 18) + pad(TunnelWords.state(s.state), 26)
-                  + pad(TunnelWords.interfaceDetail(s, in: m), 22)
+                  + pad(TunnelWords.interfaceDetail(s), 22)
                   + (TunnelActions.openTarget(s) != nil ? "[Открыть]" : ""))
             print("        подсказка: \(s.reason)")
         }
-        print("  " + TunnelWords.standingNote(m))
         print("")
 
         print("--- RAIL, FOOTER AND STRIP -----------------------------------------")
