@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Combine
 
 // =====================================================================
@@ -93,6 +94,36 @@ struct AppRowState: Equatable, Identifiable {
     }
 }
 
+/// Everything the window popover draws. `IslandModel.windowPopover` is
+/// nil while it is shut, and shut is the only state in which this whole
+/// feature costs anything at all — which is nothing: no AX call, no
+/// observer, no timer. See AppWindowList.swift.
+struct WindowPopoverState: Equatable {
+    let pid: pid_t
+    let appName: String
+    let icon: NSImage?
+    /// The PROCESSES folded into this row, biggest footprint first in the
+    /// view. Diagnostics only — there is no action on any of them.
+    let processes: [MemberProcessRow]
+    /// The WINDOWS, or why they could not be read.
+    let scan: AppWindowScan
+    /// True once this launch has shown the Accessibility prompt. One per
+    /// process, ever — same interlock as the calendar's.
+    let prompted: Bool
+    /// The two-step bulk action: nil is idle, N is "armed, and the button
+    /// is promising to close exactly N".
+    let armedOthers: Int?
+
+    /// `icon` is an AppIconCache instance, compared by identity — the same
+    /// app yields the same object, so it never falsifies the comparison.
+    /// Same rule as AppRowState.
+    static func == (a: WindowPopoverState, b: WindowPopoverState) -> Bool {
+        a.pid == b.pid && a.appName == b.appName && a.icon === b.icon
+            && a.processes == b.processes && a.scan == b.scan
+            && a.prompted == b.prompted && a.armedOthers == b.armedOthers
+    }
+}
+
 /// Everything the Память section draws, as drawn.
 struct MemorySectionState: Equatable {
     var pressure: MemoryPressureLevel?
@@ -180,6 +211,24 @@ final class IslandModel: ObservableObject {
 
     // ---- the Память section ----
     @Published private(set) var memorySection = MemorySectionState()
+
+    /// The window popover hanging off one app row's grey badge. nil is
+    /// shut. NEVER written from `ingest` — the AX calls behind it are
+    /// synchronous IPC on the main thread and have no business on a 1 Hz
+    /// tick. It moves on clicks and on an accessibility-grant change, and
+    /// at no other time.
+    @Published private(set) var windowPopover: WindowPopoverState?
+
+    /// The AXUIElements the current popover's rows were read from, in the
+    /// same order. NOT published and deliberately not inside
+    /// `WindowPopoverState`: a row's `id` is an index into THIS array and
+    /// into no other, so the two are replaced together or not at all.
+    private var windowElements: [AXUIElement] = []
+    /// Bumped on every arm/disarm so a stale auto-disarm cannot fire on a
+    /// later arming. Same trick as a debounce generation counter.
+    private var windowArmGeneration = 0
+    /// Live only while the popover is open. Nothing polls.
+    private var axTrustObserver: NSObjectProtocol?
 
     // ---- features that are not driven by MetricsEngine ----
     //
@@ -310,6 +359,7 @@ final class IslandModel: ObservableObject {
         if let calendarToken { CalendarEngine.shared.remove(calendarToken) }
         calendarToken = nil
         CalendarEngine.shared.stop()
+        closeWindowPopover()
     }
 
     func setGeometry(notchSize: CGSize, hasPhysicalNotch: Bool) {
@@ -385,6 +435,11 @@ final class IslandModel: ObservableObject {
         guard status != new else { return }
         let wasOpen = status == .opened
         status = new
+        // A popover is a thing you opened INSIDE the panel. The panel
+        // going away takes it with it — and, more to the point, takes the
+        // distributed-notification observer behind it with it, so a shut
+        // island observes nothing at all.
+        if new != .opened { closeWindowPopover() }
         // The printer poller speeds up while somebody can see the answer
         // and pulls a fresh reading the moment the panel opens.
         printerPoller.setPanelOpen(new == .opened)
@@ -817,5 +872,196 @@ final class IslandModel: ObservableObject {
             }
         }
         if next != quitPhases { quitPhases = next }
+    }
+
+    // MARK: - The window popover
+    //
+    // WHAT THE BADGE OPENS, AND WHAT IT DELIBERATELY DOES NOT.
+    //
+    // The grey [N] on an app row is `memberPIDs.count` — PROCESSES, not
+    // windows. Cursor is ten processes and one window here. So there is no
+    // per-process terminate in this section and there never will be: the
+    // members are Electron helpers, and killing the one holding an unsaved
+    // tab costs the tab and buys nothing, because the app respawns it. The
+    // row's own «Завершить» — a graceful NSRunningApplication.terminate()
+    // on the app the user clicked — stays the ONLY termination affordance
+    // in this panel.
+    //
+    // What the badge opens instead is the app's real windows, and closing
+    // one is `AXUIElementPerformAction(closeButton, kAXPressAction)`: the
+    // red dot, pressed. The app runs its own save prompt and may refuse.
+    // Nothing here sends a signal or terminates anything.
+    //
+    // EVERY ENTRY POINT BELOW IS A CLICK. None of them is reachable from
+    // `ingest`, which is what keeps synchronous AX IPC off the 1 Hz tick.
+
+    /// Click on the badge. Opens for this row, or closes it if it was
+    /// already this row's popover that was open.
+    func toggleWindowPopover(pid: pid_t) {
+        precondition(Thread.isMainThread)
+        if windowPopover?.pid == pid { closeWindowPopover() } else { openWindowPopover(pid: pid) }
+    }
+
+    /// THE ONLY PLACE IN MACPULSE THAT CAN RAISE THE ACCESSIBILITY
+    /// PROMPT, and it is one gesture after the user clicked the badge —
+    /// exactly the calendar's rule (CalendarEngine, "THE LAZY TRIGGER").
+    /// Never at launch, never on a timer, and at most once per process
+    /// however many times this is called.
+    func openWindowPopover(pid: pid_t) {
+        precondition(Thread.isMainThread)
+        _ = AppWindowList.requestTrustOnce()
+        startAXTrustObserver()
+        rebuildWindowPopover(pid: pid, armed: nil)
+    }
+
+    func closeWindowPopover() {
+        guard windowPopover != nil || axTrustObserver != nil else { return }
+        windowPopover = nil
+        windowElements = []
+        windowArmGeneration &+= 1
+        stopAXTrustObserver()
+    }
+
+    /// Press one window's close button. Re-reads afterwards rather than
+    /// assuming: the app may have put up a save sheet and refused, and a
+    /// list that claims the window is gone when it is not is worse than a
+    /// list that is a third of a second late.
+    func closeWindow(id: Int) {
+        precondition(Thread.isMainThread)
+        guard let state = windowPopover, windowElements.indices.contains(id) else { return }
+        _ = AppWindowList.close(windowElements[id])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self, self.windowPopover?.pid == state.pid else { return }
+            // Closing one changes the count, so the bulk button disarms:
+            // the number it was promising is no longer the number.
+            self.rebuildWindowPopover(pid: state.pid, armed: nil)
+        }
+    }
+
+    /// STEP ONE of the bulk action. Re-reads first, so the count the
+    /// button prints is the count as of this click, and arms for four
+    /// seconds. Closes nothing.
+    func armCloseOtherWindows() {
+        precondition(Thread.isMainThread)
+        guard let current = windowPopover else { return }
+        rebuildWindowPopover(pid: current.pid, armed: nil)
+        guard let fresh = windowPopover else { return }
+        let n = fresh.scan.closableOthers.count
+        guard n > 0 else { return }
+        arm(n, on: fresh)
+    }
+
+    /// STEP TWO. Closes every window that is not the main one.
+    ///
+    /// It re-reads BEFORE acting and refuses to act if the answer changed:
+    /// the button printed a number, the user agreed to that number, and
+    /// closing a different set than the one on the button is precisely the
+    /// surprise the two-step exists to prevent. A changed world re-arms
+    /// with the new count instead, so the next click is again a click on a
+    /// true number.
+    func closeOtherWindows() {
+        precondition(Thread.isMainThread)
+        guard let state = windowPopover, let promised = state.armedOthers else { return }
+        windowArmGeneration &+= 1          // cancel the pending auto-disarm
+
+        let (scan, elements) = AppWindowList.scan(pid: state.pid)
+        windowElements = elements
+        let targets = scan.closableOthers
+        guard targets.count == promised else {
+            // The world moved between the two clicks. Publish the list we
+            // JUST read — not a third one — and re-arm on its count, so
+            // the next click is again a click on a true number.
+            replaceScan(scan, armed: nil, on: state)
+            if !targets.isEmpty, let fresh = windowPopover { arm(targets.count, on: fresh) }
+            return
+        }
+        for row in targets where elements.indices.contains(row.id) {
+            _ = AppWindowList.close(elements[row.id])
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self, self.windowPopover?.pid == state.pid else { return }
+            self.rebuildWindowPopover(pid: state.pid, armed: nil)
+        }
+    }
+
+    // MARK: Popover plumbing
+
+    /// Arm the bulk button for four seconds.
+    ///
+    /// BOTH arming paths go through here — the first click, and the
+    /// re-arm when the window list changed between the two clicks. An
+    /// earlier version armed on the second path WITHOUT scheduling the
+    /// auto-disarm, which left a red "Точно? Закрыть 9" sitting there
+    /// indefinitely: a loaded button that outlives the moment the user
+    /// aimed it is exactly what the two-step exists to prevent.
+    private func arm(_ n: Int, on state: WindowPopoverState) {
+        setArmed(n, on: state)
+        windowArmGeneration &+= 1
+        let generation = windowArmGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            guard let self, self.windowArmGeneration == generation,
+                  let armed = self.windowPopover, armed.armedOthers != nil else { return }
+            self.setArmed(nil, on: armed)
+        }
+    }
+
+    /// Swap in a window list that has already been read, without paying
+    /// for a second scan of the same app in the same click.
+    private func replaceScan(_ scan: AppWindowScan, armed: Int?, on state: WindowPopoverState) {
+        let next = WindowPopoverState(pid: state.pid, appName: state.appName, icon: state.icon,
+                                      processes: state.processes, scan: scan,
+                                      prompted: AppWindowList.hasPrompted, armedOthers: armed)
+        if windowPopover != next { windowPopover = next }
+    }
+
+    private func setArmed(_ n: Int?, on state: WindowPopoverState) {
+        let next = WindowPopoverState(pid: state.pid, appName: state.appName,
+                                      icon: state.icon, processes: state.processes,
+                                      scan: state.scan, prompted: state.prompted,
+                                      armedOthers: n)
+        if windowPopover != next { windowPopover = next }
+    }
+
+    /// One AX read plus one one-shot rusage walk over the group's members.
+    /// Both are user-driven and neither is on any timer.
+    private func rebuildWindowPopover(pid: pid_t, armed: Int?) {
+        let app = snapshot?.processes?.apps.first { $0.pid == pid }
+        // The popover can only be opened from a drawn row, and those rows
+        // are exactly the pids `rebuildMemorySection` just retained in the
+        // icon cache — so this never takes a new icon and never grows it.
+        let icon = iconCache.icon(pid: pid,
+                                  bundleIdentifier: app?.bundleIdentifier,
+                                  isApplication: app?.isApplication ?? false)
+        let (scan, elements) = AppWindowList.scan(pid: pid)
+        windowElements = elements
+        let next = WindowPopoverState(
+            pid: pid,
+            appName: app?.name ?? windowPopover?.appName ?? "pid \(pid)",
+            icon: icon,
+            processes: AppWindowList.members(app?.memberPIDs ?? [pid]),
+            scan: scan,
+            prompted: AppWindowList.hasPrompted,
+            armedOthers: armed)
+        if windowPopover != next { windowPopover = next }
+    }
+
+    /// macOS posts this when the Accessibility grant changes. Observed
+    /// ONLY while the popover is open, so a user who grants it in System
+    /// Settings and comes back sees the list fill in — without a relaunch,
+    /// and without this app polling for a permission it may never get.
+    private func startAXTrustObserver() {
+        guard axTrustObserver == nil else { return }
+        axTrustObserver = DistributedNotificationCenter.default().addObserver(
+            forName: AppWindowList.trustDidChangeNotification,
+            object: nil, queue: .main) { [weak self] _ in
+                guard let self, let pid = self.windowPopover?.pid else { return }
+                self.rebuildWindowPopover(pid: pid, armed: nil)
+            }
+    }
+
+    private func stopAXTrustObserver() {
+        guard let axTrustObserver else { return }
+        DistributedNotificationCenter.default().removeObserver(axTrustObserver)
+        self.axTrustObserver = nil
     }
 }

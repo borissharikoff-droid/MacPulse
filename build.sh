@@ -301,6 +301,20 @@ fi
 # unprivileged per-process camera API on macOS. Neither pulls in anything the
 # contract forbids; the otool assertion after the build is what proves it.
 #
+# ApplicationServices arrives in the link map WITHOUT a -framework flag —
+# Swift auto-links it from `import ApplicationServices` in
+# Sources/AppWindowList.swift — and it is the Accessibility API behind the
+# window list on a «Память» row (AXUIElementCreateApplication, kAXWindows,
+# and pressing a window's own close button). MEASURED cost to the contract:
+# otool -L gains exactly one line,
+# /System/Library/Frameworks/ApplicationServices.framework/..., and no
+# CFNetwork beyond the updater's, no Network.framework, no NetworkExtension.
+# nm -u still imports no bind, no listen and no accept. It is a permission
+# cost, not a networking one: MacPulse asks for Accessibility the first time
+# a user clicks the badge on an app row, once per launch, and never at
+# launch — the guards below are unchanged because there is nothing here for
+# them to catch. See Sources/AppWindowList.swift and README «Разрешения».
+#
 # UserNotifications is the memory-pressure notifier — banners only, no
 # entitlement and no Info.plist key. EventKit is the next-meeting section; it
 # also drags in libswiftCoreLocation and libswiftCoreGraphics, which are Swift

@@ -93,6 +93,28 @@ if CommandLine.arguments.contains("--update-probe") {
     UpdateProbe.run(arguments: CommandLine.arguments)
 }
 
+// Does the grey badge count what the user thinks it counts? A table of
+// processes-vs-windows for the live machine, checked against the window
+// server rather than against accessibility, plus a diagnosis of which of
+// the three accessibility states this process is actually in. See
+// WindowProbe.swift.
+//   ... --windows-probe [list <pid> | close <pid> <i> --yes | others <pid> --yes | self]
+if CommandLine.arguments.contains("--windows-probe") {
+    WindowProbe.run(arguments: CommandLine.arguments)
+}
+
+// MCP server over STDIO, so an AI coding agent can ask this app what is
+// wrong with the machine. The client spawns this binary as a child process
+// and speaks JSON-RPC 2.0 over its stdin/stdout — no port, no listener, no
+// networking symbol, and no change to any guard in build.sh. Read-only:
+// nothing it exposes can quit an app, kill a process or change a setting.
+// See MCPServer.swift, whose header explains why the transport is not a
+// detail.
+//   ... --mcp
+if CommandLine.arguments.contains("--mcp") {
+    MCPServer.run(arguments: CommandLine.arguments)
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

@@ -93,8 +93,10 @@ private struct AppRow: View {
     let phase: QuitPhase
     let onQuit: () -> Void
     let onForce: () -> Void
+    let onBadge: () -> Void
 
     @State private var hovering = false
+    @State private var badgeHovering = false
 
     var body: some View {
         HStack(spacing: 7) {
@@ -114,13 +116,44 @@ private struct AppRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
 
+            // THE BADGE IS A BUTTON NOW, and the tooltip says what the
+            // number is — because it is NOT a window count and reading it
+            // as one is exactly the mistake this popover exists to fix.
+            // See IslandWindowPopover.swift.
             if row.groupCount > 1 {
-                Text("\(row.groupCount)")
-                    .font(.system(size: 8.5, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(Color(white: 0.5))
-                    .padding(.horizontal, 3).padding(.vertical, 1)
-                    .background(RoundedRectangle(cornerRadius: 3).fill(Color(white: 0.16)))
-                    .help("процессов в группе: \(row.groupCount)")
+                Button(action: onBadge) {
+                    Text("\(row.groupCount)")
+                        .font(.system(size: 8.5, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(Color(white: badgeHovering ? 0.85 : 0.5))
+                        .padding(.horizontal, 3).padding(.vertical, 1)
+                        .background(RoundedRectangle(cornerRadius: 3)
+                            .fill(Color(white: badgeHovering ? 0.26 : 0.16)))
+                }
+                .buttonStyle(.plain)
+                .onHover { badgeHovering = $0 }
+                .help("процессов: \(row.groupCount) — это не окна. Нажмите, чтобы увидеть окна")
+            } else if row.isApplication && hovering {
+                // ONE PROCESS, AND POSSIBLY TWENTY WINDOWS. Finder, Preview
+                // and TextEdit are single-process apps, so they never grow
+                // a badge — and "close all but the front one" is exactly
+                // what twenty open PDFs need. Gating the window list on the
+                // badge would have hidden the feature from the apps that
+                // want it most, which is the same confusion the badge
+                // caused, only backwards.
+                //
+                // It appears ON HOVER and in the slot the badge would have
+                // used, so a row at rest is pixel-identical to what it was.
+                Button(action: onBadge) {
+                    Image(systemName: "macwindow")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundStyle(Color(white: badgeHovering ? 0.85 : 0.45))
+                        .padding(.horizontal, 3).padding(.vertical, 1)
+                        .background(RoundedRectangle(cornerRadius: 3)
+                            .fill(Color(white: badgeHovering ? 0.26 : 0.14)))
+                }
+                .buttonStyle(.plain)
+                .onHover { badgeHovering = $0 }
+                .help("окна приложения")
             }
 
             Spacer(minLength: 6)
@@ -276,7 +309,8 @@ private struct MemorySectionView: View {
                     AppRow(row: row,
                            phase: model.quitPhase(for: row.pid),
                            onQuit: { model.requestQuit(pid: row.pid) },
-                           onForce: { model.forceQuit(pid: row.pid) })
+                           onForce: { model.forceQuit(pid: row.pid) },
+                           onBadge: { model.toggleWindowPopover(pid: row.pid) })
                 }
             }
 
@@ -294,6 +328,15 @@ private struct MemorySectionView: View {
         .frame(width: IslandMetrics.panelWidth - IslandRouter.gutter * 2,
                height: IslandMetrics.bodyHeight,
                alignment: .top)
+        // The window list, over this section's own canvas. NOT an
+        // NSPopover: IslandPanel must never become key, and nothing drawn
+        // outside the plate is clickable. See IslandWindowPopover.swift.
+        .overlay {
+            if let popover = model.windowPopover {
+                WindowPopover(state: popover, model: model)
+                    .transition(.opacity)
+            }
+        }
         .padding(.horizontal, IslandRouter.gutter)
     }
 }

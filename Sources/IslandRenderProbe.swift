@@ -328,6 +328,101 @@ enum IslandRenderProbe {
               "«Давление» is not in the registry")
         print("")
 
+        // ---- the window popover, on the body it has to fit inside -----
+        //
+        // The popover is budgeted to the point against the section's own
+        // 186 pt (see IslandWindowPopover.swift) and it is laid out inside
+        // a box IslandRouter `.clipped()`s. Same silent failure as every
+        // other section, so it gets the same check — and it can be taken
+        // on a machine where MacPulse has no Accessibility grant, because
+        // the state this renders is precisely the degraded one.
+        print("--- the window popover ----------------------------------------")
+        if let row = model.memorySection.rows.first(where: { $0.groupCount > 1 })
+                     ?? model.memorySection.rows.first {
+            model.openWindowPopover(pid: row.pid)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+            if let state = model.windowPopover {
+                print("    открыт на: \(state.appName) (pid \(state.pid))")
+                print("    процессов в группе: \(state.processes.count), "
+                      + "окон: " + (state.scan.count.map(String.init) ?? "не прочитать"))
+                print("    доступ: "
+                      + (state.scan.failure.map { "\($0)" } ?? "есть, окна прочитаны"))
+                check(!state.processes.isEmpty,
+                      "половина с процессами непуста даже без «Универсального доступа»")
+                check(state.armedOthers == nil,
+                      "массовое действие НЕ взведено само по себе — только по клику")
+            }
+            guard let popover = render(IslandView(model: model), size: panelSize) else {
+                print("could not render the popover"); exit(1)
+            }
+            write(popover, to: dir + "/popover.png")
+            let bodyTop = model.notchSize.height + IslandMetrics.railGap
+                        + IslandMetrics.railHeight + IslandMetrics.bodyGap
+            print(String(format: "    body %.1f ... %.1f pt", bodyTop,
+                         bodyTop + IslandMetrics.bodyHeight))
+            model.closeWindowPopover()
+            check(model.windowPopover == nil, "закрывается без следа")
+        } else {
+            print("    нет ни одной строки приложений — нечего открывать")
+        }
+        print("")
+
+        // ---- the popover as it looks WITH the grant -------------------
+        //
+        // SYNTHETIC ROWS, AND SAID SO. Everything above this point is real
+        // measurement; this block is not, and it is here for the one thing
+        // no measurement on an ungranted machine can show: whether ten
+        // window rows and a «Закрыть остальные (9)» actually FIT the
+        // 186 pt this section gets. The titles are invented, the layout is
+        // the shipping one — `WindowPopover` is rendered directly, with no
+        // branch of its own for being in a probe.
+        print("--- the popover WITH windows (synthetic rows, layout only) -----")
+        var fake: [AppWindowRow] = []
+        for i in 0..<10 {
+            let title: String = i == 0
+                ? "Входящие — почта"
+                : "Вкладка \(i) — очень длинный заголовок окна, который придётся обрезать"
+            fake.append(AppWindowRow(id: i, title: title, isMain: i == 0,
+                                     isMinimized: i == 7, isFullScreen: i == 8,
+                                     canClose: true))
+        }
+        var fakeProcs: [MemberProcessRow] = []
+        for i in 0..<12 {
+            let bytes = UInt64(900 - i * 60) * UInt64(1_048_576)
+            let name: String = i == 0 ? "Браузер" : "Браузер Helper (Renderer)"
+            fakeProcs.append(MemberProcessRow(pid: pid_t(1000 + i), name: name,
+                                              footprintBytes: bytes))
+        }
+        let fakeScan = AppWindowScan(windows: fake, failure: nil)
+        let fakeState = WindowPopoverState(pid: 1, appName: "Браузер", icon: nil,
+                                           processes: fakeProcs, scan: fakeScan,
+                                           prompted: true, armedOthers: nil)
+        let armedState = WindowPopoverState(pid: 1, appName: "Браузер", icon: nil,
+                                            processes: fakeProcs, scan: fakeScan,
+                                            prompted: true, armedOthers: 9)
+        print("    окон: \(fake.count), «Закрыть остальные» закроет: "
+              + "\(fakeState.scan.closableOthers.count)")
+        check(fakeState.scan.closableOthers.count == 9,
+              "десять окон, одно главное -> кнопка обещает ровно 9")
+        let popWidth = IslandMetrics.panelWidth - IslandRouter.gutter * 2
+        // The state EVERY user meets first: the grant has not been given.
+        // Synthetic only in that the refusal is constructed rather than
+        // waited for; the view is the shipping one.
+        let refusedState = WindowPopoverState(pid: 1, appName: "Браузер", icon: nil,
+                                              processes: fakeProcs,
+                                              scan: .failed(.notTrusted),
+                                              prompted: true, armedOthers: nil)
+        let shots: [(String, WindowPopoverState)] = [("окна", fakeState),
+                                                     ("взведено", armedState),
+                                                     ("без-доступа", refusedState)]
+        for (label, state) in shots {
+            guard let img = render(WindowPopover(state: state, model: model),
+                                   size: CGSize(width: popWidth, height: IslandMetrics.bodyHeight))
+            else { print("could not render \(label)"); exit(1) }
+            write(img, to: dir + "/popover-\(label).png")
+        }
+        print("")
+
         // ---- is anything CLIPPED? -------------------------------------
         //
         // `IslandRouter` frames each section to `bodyHeight` and clips it,
