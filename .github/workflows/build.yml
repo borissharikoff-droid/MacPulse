@@ -18,6 +18,10 @@ name: build
 on:
   push:
     branches: [main]
+    # Документация не может сломать сборку, а прогон стоит трёх минут на
+    # универсальную компиляцию. Скрипты сюда НЕ попадают: их синтаксис
+    # проверяется последним шагом ниже.
+    paths-ignore: ['**.md', 'docs/**', 'LICENSE', '.github/ISSUE_TEMPLATE/**']
   pull_request:
   workflow_dispatch:
 
