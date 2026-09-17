@@ -815,7 +815,8 @@ enum ClipboardProbe {
         } else {
             var line = "    │"
             for item in state.items {
-                line += " [" + (item.isLive ? "⠿" : "×") + " " + fit(item.preview) + "]"
+                let mark = item.isLive ? "⠿" : "×"
+                line += " [\(mark) \(fit(item.preview))]"
             }
             print(line)
         }

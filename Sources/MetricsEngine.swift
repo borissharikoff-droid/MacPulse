@@ -580,10 +580,24 @@ public final class MetricsEngine {
     /// Synchronous; safe from any thread. Spins up the lazy samplers if they
     /// have not been created yet.
     public func availability() -> Availability {
-        queue.sync {
+        // The closure's result type is written down rather than inferred.
+        // Without it the solver has to type-check the whole 10-argument
+        // initialiser below just to learn what `sync` returns.
+        queue.sync { () -> Availability in
             let smc = smcSampler
-            let sensors = (smc?.performanceKeys.count ?? 0) + (smc?.efficiencyKeys.count ?? 0)
-                        + (smc?.gpuKeys.count ?? 0) + (smc?.batteryKeys.count ?? 0)
+            // Four `+` over four `??` used to be one expression here, and
+            // it is the same trap as MeetingStripSlot's tooltip: both
+            // operators are heavily overloaded, so the solver explores
+            // their overloads combinatorially across the chain. This
+            // toolchain merely found it slow; the Swift in Xcode 15.4
+            // gave up with "unable to type-check this expression in
+            // reasonable time", which is an error. Four statements cost
+            // the reader nothing and the solver nothing.
+            var sensors = 0
+            sensors += smc?.performanceKeys.count ?? 0
+            sensors += smc?.efficiencyKeys.count ?? 0
+            sensors += smc?.gpuKeys.count ?? 0
+            sensors += smc?.batteryKeys.count ?? 0
             let kinds = HostInfo.shared.coreClusterKinds
             return Availability(
                 ioReportLoaded: IOReportLib.shared != nil,

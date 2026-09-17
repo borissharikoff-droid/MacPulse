@@ -122,12 +122,17 @@ enum IslandGeometryProbe {
 
             // Built by hand: String(format:) with %s takes a C string, and
             // handing it a Swift String segfaults rather than complaining.
-            print("  " + pad(fmt(request), 9) + "  " + pad(fmt(granted), 7)
-                  + "  " + pad(fmt(drawn.minX), 8) + " ... " + pad(fmt(drawn.maxX), 8)
-                  + "  " + pad(fmt(drawn.width), 6)
-                  + "  " + pad(fmt(notchCentre), 12)
-                  + "  " + pad(fmt(hit.minX), 8) + " ... " + pad(fmt(hit.maxX), 8)
-                  + "  " + (statusItemX == nil ? "n/a" : (fits ? "yes" : "NO")))
+            // Interpolated, not a chain of eleven `+`. Same reason as
+            // MetricsEngine.availability(): `+` is overloaded enough that a
+            // chain this long is a combinatorial type-check, and the Swift
+            // in Xcode 15.4 refuses such expressions outright.
+            let verdict = statusItemX == nil ? "n/a" : (fits ? "yes" : "NO")
+            print("  \(pad(fmt(request), 9))  \(pad(fmt(granted), 7))"
+                  + "  \(pad(fmt(drawn.minX), 8)) ... \(pad(fmt(drawn.maxX), 8))"
+                  + "  \(pad(fmt(drawn.width), 6))"
+                  + "  \(pad(fmt(notchCentre), 12))"
+                  + "  \(pad(fmt(hit.minX), 8)) ... \(pad(fmt(hit.maxX), 8))"
+                  + "  \(verdict)")
         }
 
         // ---- what actually fits INSIDE the granted wing ----

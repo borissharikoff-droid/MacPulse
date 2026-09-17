@@ -667,9 +667,9 @@ enum TunnelProbe {
         print("--- TUNNEL INTERFACES UP RIGHT NOW ---------------------------------")
         for t in m.tunnels {
             let signature = t.signature.map { "\($0.displayName) [\(t.signatureConfidence?.rawValue ?? "?")]" } ?? "—"
-            print("  " + pad(t.name, 8) + "v4: " + pad(t.ipv4 ?? "—", 14)
-                  + "mtu: " + pad(t.mtu.map { "\($0)" } ?? "—", 6)
-                  + "signature: " + signature)
+            let v4 = pad(t.ipv4 ?? "—", 14)
+            let mtu = pad(t.mtu.map { "\($0)" } ?? "—", 6)
+            print("  \(pad(t.name, 8))v4: \(v4)mtu: \(mtu)signature: \(signature)")
         }
         print("  (\(m.tunnels.count) поднято, \(m.addressedTunnels.count) с адресом IPv4)")
         print("")
