@@ -1,26 +1,26 @@
-name: Что-то работает не так
-description: Островок не появился, не те цифры, приложение закрылось само
+name: Something is wrong
+description: The island doesn't appear, the numbers look off, the app quit on its own
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Не нужно извиняться за короткое описание. «Островок не появляется на
-        внешнем мониторе» — это уже полноценный баг-репорт.
+        No need to apologise for a short report. "The island doesn't show up on
+        an external display" is already a complete one.
 
   - type: textarea
     id: what
     attributes:
-      label: Что произошло
-      placeholder: Навожу мышь на вырез — ничего не открывается.
+      label: What happened
+      placeholder: I hover over the notch and nothing opens.
     validations:
       required: true
 
   - type: input
     id: version
     attributes:
-      label: Версия MacPulse
-      description: Значок в строке меню ▸ верхняя строка меню, либо «Проверить обновления…»
+      label: MacPulse version
+      description: Menu bar icon ▸ top line, or "Проверить обновления…"
       placeholder: "1.0.0"
     validations:
       required: true
@@ -28,8 +28,8 @@ body:
   - type: input
     id: mac
     attributes:
-      label: Мак и версия macOS
-      description: 🍎 ▸ Об этом Mac
+      label: Mac and macOS version
+      description: 🍎 ▸ About This Mac
       placeholder: "MacBook Air M1, macOS 15.3"
     validations:
       required: true
@@ -37,12 +37,12 @@ body:
   - type: textarea
     id: probe
     attributes:
-      label: Вывод диагностики (по желанию)
+      label: Diagnostics (optional)
       description: |
-        Если не трудно — выполните в Терминале и вставьте вывод. Это ускоряет
-        всё в разы. В выводе видно: какие вкладки островка сейчас живые,
-        названия приложений с большим расходом памяти и состояние автозапуска.
-        Паролей, содержимого буфера обмена и названий встреч там нет.
+        If it's no trouble, paste the output of these. It speeds everything up
+        enormously. The output contains: which island sections are currently
+        live, the names of apps using a lot of memory, and the launch-at-login
+        state. No passwords, no clipboard contents, no event titles.
 
         ```
         /Applications/MacPulse.app/Contents/MacOS/MacPulse --rail-probe 14

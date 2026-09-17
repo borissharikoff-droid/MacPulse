@@ -1,24 +1,24 @@
-name: Идея
-description: Чего не хватает в островке
+name: Idea
+description: Something the island is missing
 labels: ["idea"]
 body:
   - type: markdown
     attributes:
       value: |
-        Одно правило, которое решает судьбу почти всех идей: **секция островка
-        появляется, только когда ей есть что сказать.** Если предложение
-        добавляет строку, которая висит всегда, оно почти наверняка не подойдёт —
-        но то же самое в виде «показывать, только когда происходит X» подойдёт.
+        One rule decides the fate of almost every idea here: **a section appears
+        only when it has something to say.** A proposal that adds a line which is
+        always on screen almost certainly won't fit — but the same thing phrased
+        as "show it only while X is happening" will.
 
   - type: textarea
     id: idea
     attributes:
-      label: Что хотелось бы видеть
+      label: What you'd like to see
     validations:
       required: true
 
   - type: input
     id: when
     attributes:
-      label: Когда это должно появляться
-      placeholder: Только когда подключается внешний монитор
+      label: When should it appear
+      placeholder: Only while an external display is connected

@@ -1,478 +1,114 @@
 <div align="center">
 
-# MacPulse
-
-**Системный монитор, который живёт в вырезе MacBook.**
+<img src="docs/banner.svg" width="820" alt="MacPulse — a system monitor that lives in the MacBook notch">
 
 [![build](https://github.com/borissharikoff-droid/MacPulse/actions/workflows/build.yml/badge.svg)](https://github.com/borissharikoff-droid/MacPulse/actions/workflows/build.yml)
-![macOS 13+](https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white)
-![Apple Silicon и Intel](https://img.shields.io/badge/Apple%20Silicon-%D0%B8%20Intel-000000)
-![Зависимостей: 0](https://img.shields.io/badge/%D0%B7%D0%B0%D0%B2%D0%B8%D1%81%D0%B8%D0%BC%D0%BE%D1%81%D1%82%D0%B5%D0%B9-0-2ea44f)
-![Лицензия MIT](https://img.shields.io/badge/%D0%BB%D0%B8%D1%86%D0%B5%D0%BD%D0%B7%D0%B8%D1%8F-MIT-blue)
+[![release](https://img.shields.io/github/v/release/borissharikoff-droid/MacPulse?color=0a0a0a&labelColor=0a0a0a)](https://github.com/borissharikoff-droid/MacPulse/releases/latest)
+![macOS 13+](https://img.shields.io/badge/macOS-13%2B-0a0a0a?logo=apple&logoColor=white&labelColor=0a0a0a)
+![universal](https://img.shields.io/badge/universal-arm64%20%2B%20x86__64-0a0a0a?labelColor=0a0a0a)
+![dependencies 0](https://img.shields.io/badge/dependencies-0-2ea44f?labelColor=0a0a0a)
 
-<img src="docs/expanded.png" width="620" alt="Развёрнутая панель MacPulse: давление памяти, приложения по footprint, буфер обмена">
+<br>
+
+<img src="docs/expanded.png" width="740" alt="The expanded panel: memory pressure, apps by footprint, clipboard shelf">
 
 </div>
 
+## Install
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/borissharikoff-droid/MacPulse/main/install.sh | bash
 ```
 
-Свёрнутый — одна точка, цвет которой равен вердикту ядра о давлении памяти.
-Наводишь мышь — вырез разворачивается в панель 560 × 280, и в ней показано
-только то, чему прямо сейчас есть что сказать.
+Ten seconds, no dialogs. macOS 13+, Apple Silicon and Intel.
 
-**Главное отличие в одной строке:** MacPulse измеряет *churn компрессора
-памяти* — сколько байт в секунду macOS сжимает и распаковывает. На
-8-гигабайтном Apple Silicon это и есть настоящий сигнал «сейчас будет
-тормозить», и его не показывает ни один монитор, который можно скачать.
+> [!NOTE]
+> **The interface is in Russian.** Everything below describes it in English, but the app itself is not translated.
 
----
+<details>
+<summary>Why a terminal command and not the .dmg</summary>
 
-## Почему компрессор, а не «свободная память»
+<br>
 
-Со времён Mavericks macOS не выгружает неиспользуемые страницы на диск сразу,
-а **сжимает** их прямо в оперативной памяти. Поэтому:
+MacPulse is ad-hoc signed — no paid Apple Developer ID. Since macOS 15, Finder refuses to open such an app at all: the old Control-click ▸ Open bypass is gone, leaving System Settings ▸ Privacy & Security ▸ "Open Anyway", three steps in a place nobody looks, after a dialog claiming the app is damaged. It is not damaged.
 
-- **«Свободная память» почти ничего не значит.** Пустая страница — это
-  потраченная впустую страница, и система старательно занимает всё, до чего
-  дотянется, под кэш. Мак со 100 МБ «свободно» может летать, а мак с гигабайтом
-  «свободно» — задыхаться.
-- **Кнопки «очистить память» делают хуже.** Они выбрасывают кэш, который
-  системе через секунду снова понадобится, и она снова его читает и снова
-  сжимает. Это дополнительная работа, а не освобождённая память. В MacPulse
-  такой кнопки нет и не будет: пункт меню «Очистить кэши и логи» подписан
-  честно — он освобождает **диск**, на давление памяти он не влияет никак.
-- **Тормозит не «мало памяти», а работа компрессора.** Когда данные не
-  помещаются, каждое обращение к сжатой странице — это распаковка на пути
-  page fault. Вот это и чувствуется как лаг: курсор дёргается, переключение
-  окон запаздывает, Safari перезагружает вкладку, на которую вы только что
-  вернулись.
+Quarantine is applied by whatever downloads the file, and `curl` does not apply it — so an installer that fetches the app itself lands a working copy with no dialog. Same trick as `brew install --cask --no-quarantine`.
 
-MacPulse читает счётчики `compressions` и `decompressions` из
-`vm_statistics64`, переводит страницы в байты по настоящему размеру страницы
-(**16 384 байта** на Apple Silicon, не 4096) и считает сумму в байт/с.
+The installer verifies the bundle identifier, the code signature and that a slice for your CPU is actually present; it refuses on any of the three and leaves whatever you already have untouched. It never uses `sudo`. Read it first if you like — `curl -O` the URL, then `less install.sh`.
 
-Одна деталь, ради которой это вообще работает: **две подряд идущие выборки
-`host_statistics64` из непривилегированного процесса могут вернуть
-бит-в-бит одинаковые счётчики почти на секунду.** Измерено здесь: опрос
-`decompressions` каждые 50 мс шёл ровно, а потом замирал на 0,59–0,97 с,
-хотя `vm_stat` в это же время видел рост на тысячи страниц. Наивное деление
-на номинальный интервал даёт в такие моменты **0 МБ/с** — то есть ровно тот
-ложный ноль, от которого весь смысл теряется. Поэтому скорость
-пересчитывается только когда счётчики действительно сдвинулись, между
-сдвигами держится предыдущее значение, и настоящий ноль ставится только
-после трёх секунд полной тишины.
+A `.dmg` is attached to [every release](https://github.com/borissharikoff-droid/MacPulse/releases/latest) for anyone who would rather drag and take the Settings trip.
 
-**Где это видно.** Число попадает в предупреждение о памяти («Компрессор:
-24 МБ/с», порог 20 МБ/с) и в вывод `--probe`. Цвет точки в вырезе и заголовок
-панели берутся из собственного вердикта ядра
-(`kern.memorystatus_vm_pressure_level`), а не из самодельной эвристики.
+**Uninstall:** `curl -fsSL …/install.sh | bash -s -- --uninstall`
 
----
+</details>
 
-## Что показывает панель
+## What it measures that others don't
 
-Рельс слева перечисляет **только живые** секции. На тихой машине там один
-пункт — это не баг, это правило.
+Since Mavericks, macOS does not swap unused pages to disk — it **compresses** them in RAM. So "free memory" means almost nothing, and the thing that actually makes a Mac feel slow is not a number any monitor displays: it is the **compressor working**. Every touch of a compressed page is a decompression on the page-fault path, and that is what you feel as a stuttering cursor and a Safari tab reloading itself.
 
-| Секция | Что в ней |
+MacPulse reads `compressions` and `decompressions` from `vm_statistics64` and reports the sum in bytes per second. On an 8 GB Apple Silicon Mac that is the real "you are about to lag" signal.
+
+It also refuses to ship a "free memory" button. RAM cleaners throw away cache the system re-reads and re-compresses a second later — that is extra work, not freed memory. The only action that lowers pressure is quitting the app causing it, so there is a Quit button on each row, and nowhere else.
+
+## The panel
+
+Collapsed, the island is **one dot**, coloured by the kernel's pressure verdict. Hovering expands it. The rail lists every section, but only the ones with something to say right now are lit.
+
+| Section | What's in it |
 |---|---|
-| **Память** | Уровень давления, «занято из всего», своп, и ваши приложения по `phys_footprint` — у каждого кнопка «Выход», а у серого бейдж­а список окон |
-| **Предупреждения** | История предупреждений о памяти и их состояние |
-| **Печать** | Статус печати Bambu P1S — только если вы держите ту же локальную панель на `127.0.0.1:8787` (см. «Ограничения») |
-| **Звук** | Какие приложения держат открытый аудиопоток + кнопки транспорта |
-| **Туннель** | Какой интерфейс реально несёт трафик наружу |
-| **Буфер** | История буфера обмена, только в памяти, с фильтром секретов |
-| **Встреча** | Сколько осталось до ближайшей встречи (выключено по умолчанию) |
-| **Рельс приватности** | Кто держит микрофон и включена ли камера |
+| **Memory** | Pressure level, used-of-total, swap, your apps by `phys_footprint` — each with a Quit button, and a badge that opens that app's real window list |
+| **Print** | Bambu P1S job status, if you run the same local panel on `127.0.0.1:8787` |
+| **Meeting** | Time until your next event — off by default, opt-in from the menu |
+| **Sound** | Which apps hold an open audio stream, with transport buttons |
+| **Tunnel** | Which interface actually carries your traffic out, plus public IP and country |
+| **Session** | An active [VibeHub](https://github.com/EmilSwag/vibehub) coding session, if you happen to run one |
 
-<img src="docs/windows-popover.png" width="620" alt="Список окон приложения: у каждого окна кнопка «Закрыть», ниже процессы группы без кнопок">
+Along the bottom: a **clipboard shelf** — last five entries, drag any chip straight into another app. In memory only, nothing written to disk, and anything marked concealed by a password manager is never even read.
 
-<sup>Данные в этом кадре синтетические — так выглядит попап со списком окон.</sup>
+## What it costs
 
-Четыре из них стоят отдельного слова.
+A monitor that eats the machine is pointless, so MacPulse measures itself from the inside (`task_thread_times_info`, via `--cost-log`):
 
-**Серый бейдж считает не окна, и это видно.** `[10]` рядом с именем
-приложения — это число ПРОЦЕССОВ, которые ядро свело в одну группу
-(`responsibility_get_pid_responsible_for_pid`), а не число окон. Измерено
-на этой машине: у Cursor 34 процесса и ОДНО окно, у Telegram 3 процесса и
-одно окно. Поэтому по нажатию бейджа открывается список настоящих окон —
-у каждого «Закрыть», плюс «Закрыть остальные (N)» в два шага, — а под ним
-процессы группы с их памятью и БЕЗ кнопок завершения. Кнопки там нет
-намеренно: это хелперы Electron (рендерер вкладки, extension host, GPU),
-убийство одного стоит несохранённой работы, а приложение поднимет его
-заново. Завершить приложение по-человечески можно там же, где и раньше, —
-кнопкой «Завершить» в самой строке.
+| | % of one core |
+|---|---|
+| Measured idle | **0.27** |
+| Walking all 441 processes | 0.059 |
+| Polling the clipboard at 1 Hz | 0.00013 |
+| Update check, amortised over 6 h | ~0.0002 |
 
-**Предупреждение о памяти, которое не надоедает.** Эта машина сидит на
-уровне давления 2 часами при совершенно обычной работе. Правило «уровень ≥ 2 →
-предупреждать» на шести часах выборок 1 Гц дало бы **21 600** срабатываний;
-детектор MacPulse даёт **одно**: 45 секунд непрерывного давления, не чаще
-трёх раз в сутки, с гашением дребезга на спаде. И в тексте не написано, что
-macOS вот-вот что-то закроет, — это утверждение появляется, только если
-счётчик `kern.memorystatus.kill_on_sustained_pressure_count` говорит, что это
-уже случилось. (Заодно измерено: штатный
-`DispatchSource.makeMemoryPressureSource` не сработал **ни разу** в пяти
-прогонах с искусственным давлением, включая 63 секунды устойчивого
-kernel-warning. Поэтому в этом пути его нет.)
+The measurement that shaped the whole UI: **sampling the machine is nearly free — telling SwiftUI about it is what costs.** One `@Published` write per second into a trivial view cost 0.316% of a core, against 0.059% for the full process walk.
 
-**Туннель, который не врёт.** `route get default` на этой машине показывает
-`en0`, когда 100% трафика идёт через туннель: Clash не трогает маршрут по
-умолчанию, а ставит восемь более точных разбиений (`1/8`, `2/7`, … `128.0/1`),
-которые вместе накрывают весь IPv4. `scutil --nwi` про `utun6` тоже молчит.
-MacPulse вместо этого спрашивает у ядра `RTM_GET` на публичный адрес и верит
-ответу. Ни одного пакета на эти адреса не отправляется.
+## Permissions
 
-**Кнопка, у которой есть эффект.** Единственное действие, которое реально
-снижает давление памяти, — закрыть приложение, которое его создаёт (Telegram
-здесь занимал 1,78 ГБ = 22% всей памяти машины). Поэтому «Выход» стоит у
-каждой строки списка, и только у той, на которую нажали: сначала обычный
-`terminate()`, а принудительное завершение — только вторым явным кликом и
-только после того, как обычное не сработало. Кнопки «закрыть всё» нет.
+**None are requested at launch.** Three are possible, each only after you click something:
 
----
+- **Calendar** — only if you tick "show next meeting". Reads the start time; titles are never stored or sent.
+- **Notifications** — only if you enable memory alerts.
+- **Accessibility** — only the first time you click the grey process badge on a memory row, to list that app's windows. Refuse it and the row says so in one line while everything else keeps working.
 
-## Установка
+Network access is two files wide and checked at build time: HTTPS to three GitHub hosts for updates, one request to `cloudflare.com/cdn-cgi/trace` for your public IP, a loopback socket for the printer, and a read-only `PF_ROUTE` query for the tunnel. `Network.framework` is absent from the link map, and `./build.sh` fails if that stops being true.
+
+## For AI agents
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/borissharikoff-droid/MacPulse/main/install.sh | bash
+/Applications/MacPulse.app/Contents/MacOS/MacPulse --mcp
 ```
 
-Скачивает последний релиз, проверяет подпись и целостность, кладёт в
-«Программы» и запускает. Занимает секунд десять. **Предупреждения о
-неизвестном разработчике не будет.**
+A read-only MCP server over stdio — no port, no listener. Six tools, including the compressor churn no other monitor reports. It exposes no clipboard contents, no window titles and no file paths.
 
-### Почему через терминал, а не как обычно
-
-У проекта нет платного сертификата Apple Developer ID ($99 в год), поэтому
-приложение подписано ad-hoc подписью. Начиная с macOS 15 такие приложения
-Finder не открывает вообще: старый обход «правой кнопкой ▸ Открыть» Apple
-убрала. Остаётся поход в **Системные настройки ▸ Конфиденциальность и
-безопасность**, вниз до строчки про заблокированное приложение, «Всё равно
-открыть» — три шага в месте, куда никто не заходит, после диалога, который
-говорит, что приложение повреждено. Оно не повреждено.
-
-Карантин навешивает не система, а то, **чем** файл скачали: браузер ставит
-метку, `curl` не ставит. Поэтому установщик, который скачивает приложение
-сам, ставит рабочую копию без единого диалога. Ровно так же работает
-`brew install --cask --no-quarantine`.
-
-### Не доверяете `| bash` — и правильно
-
-```bash
-curl -fsSL -O https://raw.githubusercontent.com/borissharikoff-droid/MacPulse/main/install.sh
-less install.sh          # 200 строк, половина из них — комментарии, почему
-bash install.sh
-```
-
-Скрипт не использует `sudo`, не трогает ничего за пределами устанавливаемого
-бандла и удаляет старую копию только после того, как прочитает её
-`CFBundleIdentifier` и убедится, что это действительно MacPulse.
-
-### Или .dmg, если привычнее перетаскивать
-
-[Последний релиз](https://github.com/borissharikoff-droid/MacPulse/releases/latest)
-→ `MacPulse-<версия>.dmg`. Открыть, перетащить в «Программы». Дальше macOS
-один раз откажется его запускать, и это лечится так:
-
-- **macOS 15 и новее:** Системные настройки ▸ Конфиденциальность и
-  безопасность ▸ пролистать вниз ▸ «Всё равно открыть» ▸ открыть приложение
-  ещё раз.
-- **macOS 13–14:** правой кнопкой по MacPulse ▸ «Открыть» ▸ в предупреждении
-  снова «Открыть». Именно из меню правой кнопки: двойной клик в этот момент
-  не сработает.
-
-Внутри DMG лежит `Установить.command`, который делает то же самое, что
-однострочник выше. Но честно: **он может не открыться ровно по той же
-причине** — пометка карантина висит и на нём, и Gatekeeper блокирует такие
-скрипты так же, как приложения. Установка через `curl` этой проблемы не имеет
-в принципе, потому что `curl` пометку не ставит.
-
-### Или собрать из исходников
+## Build from source
 
 ```bash
 git clone https://github.com/borissharikoff-droid/MacPulse.git
-cd MacPulse
-./build.sh          # 2–4 минуты, кладёт готовое в /Applications
+cd MacPulse && ./build.sh
 ```
 
-Нужны Command Line Tools (`xcode-select --install`). Xcode, SPM, CocoaPods и
-вообще какие-либо зависимости — не нужны: это ~50 плоских файлов `.swift`,
-которые компилирует один вызов `swiftc`. `build.sh` сам пинит SDK и цель
-сборки и проверяет контракт до и после компиляции. Подписывает локальным
-сертификатом, если он есть в связке ключей, иначе ad-hoc — специально
-заводить ничего не нужно.
+Command Line Tools and nothing else — no Xcode, no SPM, no dependencies. ~60 flat `.swift` files and one `swiftc` call.
 
-### Какие маки поддерживаются
+## More
 
-macOS 13 Ventura и новее, **Apple Silicon и Intel** — релизный бинарник
-универсальный, обе архитектуры внутри одного файла. Установщик проверяет,
-что нужный срез в скачанном файле действительно есть, и отказывается ставить
-приложение, которое не запустится.
+[Full documentation (Russian)](docs/README.ru.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Releasing (RU)](RELEASING.md)
 
-Вырез (notch) не обязателен. На маке без выреза островок живёт в том же
-месте — по центру у верхнего края.
+<br>
 
-### Удалить
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/borissharikoff-droid/MacPulse/main/install.sh | bash -s -- --uninstall
-```
-
-Убирает приложение, запись автозапуска и свои настройки. Либо просто
-перетащите MacPulse в корзину — тогда останется только запись автозапуска,
-которую macOS сама погасит при следующем входе.
-
-### Обновления
-
-В меню есть «Проверить обновления…». Кроме того, приложение молча смотрит
-GitHub Releases один раз через 45 секунд после запуска и дальше раз в шесть
-часов (с получасовым допуском, чтобы таймер не будил машину). Тихая проверка
-не сообщает об ошибках: офлайн — это нормальное состояние ноутбука, а не
-происшествие.
-
-Скачанный архив проверяется `codesign --verify --deep --strict`. Это
-доказывает **целостность** — что файл не побился и не был изменён после
-подписи. Это не доказывает **происхождение**: за ad-hoc подписью не стоит
-ничьё удостоверение. Происхождение здесь держится ровно на одном — на TLS к
-`api.github.com`, `github.com` и `objects.githubusercontent.com`, и больше ни
-на чём. Так и написано вместо слова «проверено».
-
----
-
-## Разрешения
-
-**При запуске MacPulse не просит ничего.** Ни Accessibility, ни «Запись
-экрана», ни доступ к микрофону или камере, ни к файлам. Никакого sudo,
-никаких паролей, никаких вспомогательных служб.
-
-Три разрешения появляются позже и только по вашему клику:
-
-| Разрешение | Когда спросят | Зачем |
-|---|---|---|
-| **Календарь** | Только если включить «Показывать следующую встречу» в меню | Время начала ближайшей встречи. Название живёт в памяти и нигде больше: и `description`, и `debugDescription` у события отредактированы, так что случайный `print` не сможет его вынести |
-| **Уведомления** | Только если разрешить предупреждения о памяти | Баннер «Память под давлением» и кнопка закрыть приложение-виновника |
-| **Универсальный доступ** (Accessibility) | Только когда вы первый раз нажмёте серый бейдж с числом в строке приложения в «Памяти» | Список окон этого приложения и кнопки «Закрыть» у каждого. Прочитать чужие окна на macOS иначе нельзя — непривилегированного API для этого не существует |
-
-**Про «Универсальный доступ» отдельно, потому что это самое дорогое из
-трёх.** Раньше в этом абзаце стояло «два разрешения», и до появления
-списка окон MacPulse действительно мог обещать, что Accessibility не
-просит никогда. Теперь не может, и вот точные условия:
-
-* Диалог показывается **ровно один раз за запуск приложения** и только
-  из одного места в коде — клика по бейджу. Ни при старте, ни по
-  таймеру, ни повторно, сколько бы раз вы ни открывали список.
-* **Откажете — ничего не сломается.** Список окон откроется и скажет
-  одну строку: окон не видно. Кнопка ведёт в «Настройки → Конфиденциальность
-  → Универсальный доступ». Нижняя половина списка — процессы приложения и
-  сколько памяти держит каждый — работает без всякого разрешения и
-  остаётся на месте.
-* Разрешение спрашивают **только за чтение и за нажатие крестика**.
-  Закрыть окно здесь — это `AXUIElementPerformAction(kAXPressAction)` на
-  кнопке закрытия окна, то есть ровно то же, что ваш собственный клик по
-  красному кружку: приложение само спросит «Сохранить изменения?» и само
-  имеет право отказаться. Ни один процесс тут не убивается: единственная
-  кнопка в MacPulse, которая завершает приложение, — это «Завершить» в
-  строке, и она была там раньше.
-* Отозвать можно в любой момент в тех же настройках; MacPulse заметит это
-  сам, без перезапуска.
-
-Можно не давать ни одного — всё остальное работает без единого разрешения.
-Рельс приватности, например, называет приложение, которое держит микрофон,
-вообще без TCC: это публичный API CoreAudio из macOS 14, и это проверено
-отдельно — свежесобранное приложение с никогда не виденным bundle ID,
-запущенное так, чтобы не унаследовать права терминала, читало список
-процессов, само имея статус «разрешение не запрашивалось».
-
-Куда MacPulse ходит по сети: `api.github.com`, `github.com`,
-`objects.githubusercontent.com` (обновления) и `127.0.0.1:8787` (панель
-принтера, если она у вас есть). Это не обещание в README — это проверка в
-`build.sh`, которая валит сборку, если в единственном файле с сетью появится
-хост не из списка, или если сокет откроет кто-то ещё.
-
----
-
-## Ограничения
-
-Честно и без оговорок.
-
-- **Только Apple Silicon.** Сборка идёт под `arm64-apple-macos13.0`. Сборки
-  под Intel нет.
-- **macOS 13 и новее.** Разработано и измерено на macOS 26.6.2, M2, 8 ГБ.
-  На 13.x часть вещей деградирует по-тихому: процессный API микрофона
-  появился в macOS 14, без него остаётся сигнал уровня устройства.
-- **Островок хочет вырез.** Без выреза (MacBook до 2021, iMac, внешний
-  монитор) MacPulse рисует ту же панель «пилюлей» 180 × 32 по центру строки
-  меню. Это работает, но красиво — именно в вырезе.
-- **Секция «Печать» появится только у того, у кого есть та же самая локальная
-  панель** для Bambu P1S на `127.0.0.1:8787`. Это личная штука автора, а не
-  общая функция. С самим принтером MacPulse не разговаривает и разговаривать
-  не может: это означало бы MQTT поверх TLS, то есть `Security.framework` в
-  карте линковки. Только чтение: `POST`-пути в коде нет вообще, так что
-  случайно остановить девятичасовую печать нечем.
-- **Названия трека нет и не будет.** На macOS 15.4+ путь чтения MediaRemote
-  мёртв: все символы находятся, все колбэки срабатывают и все отвечают
-  пустотой — байт в байт как при полной тишине, пока Music заведомо играет.
-  Это тихий отказ по ограниченному entitlement, который нельзя выдать себе
-  самому (пробник, подписанный им ad-hoc, был убит ядром прямо на exec).
-  Поэтому секция «Звук» — это «кто держит аудиопоток», а не карточка
-  «сейчас играет». Поля под название нет: прочерк на месте трека хуже, чем
-  честное отсутствие.
-- **Play/pause там же — «неизвестно».** Флаг «поток открыт» держится ещё
-  5–10 секунд после нажатия паузы (измерено на Music и QuickTime). Глиф ▶/⏸
-  из него врал бы десять секунд подряд, поэтому его нет. **Управление**
-  при этом работает: путь записи MediaRemote жив и entitlement не требует.
-- **Камеру видно, но не поимённо.** Непривилегированного API «какой процесс
-  держит камеру» в macOS нет. Микрофон называется по имени приложения,
-  камера — только «включена/выключена».
-- **Список процессов — только ваш пользователь.** Непривилегированный
-  процесс не может заглянуть в чужой. Панель так и подписана: «видно N из M
-  процессов». `top` видит всё только потому, что он setuid root.
-- **Интерфейс на русском.** Локализации нет.
-- **Приложение не нотаризовано** и подписано ad-hoc — отсюда окно про
-  неизвестного разработчика при первом запуске.
-- **Все числа в этом README измерены на одной машине** — MacBook Air M2,
-  8 ГБ, macOS 26.6.2. На вашей они будут другими; воспроизводимы способы
-  измерения, а не значения.
-
----
-
-## Сколько он стоит машине
-
-Монитор, который сам ест ресурсы, бессмысленен, поэтому MacPulse измеряет
-себя изнутри (`task_thread_times_info`, флаг `--cost-log`):
-
-| | % одного ядра |
-|---|---|
-| Бюджет, из которого всё считалось | 0,475 |
-| Измеренный idle | 0,27 |
-| Обход всех 441 процессов | 0,059 |
-| Опрос буфера обмена (1,32 мкс на вызов при 1 Гц) | 0,00013 |
-| Проверка обновлений, амортизированно (раз в 6 ч) | ~0,0002 |
-
-Отдельный измеренный вывод, который определил всю архитектуру UI: **померить
-машину почти бесплатно, а вот рассказать об этом SwiftUI — дорого.** Одна
-запись в `@Published` каждую секунду в тривиальную вью стоила 0,316% ядра,
-перерисовка иконки в строке меню — 0,389%, при том что полный обход процессов
-стоит 0,059%. Поэтому модель публикует три вещи, сравнивает уже готовые
-строки и молчит, когда картинка не изменилась, а секция «Память» вообще не
-считается, пока панель закрыта.
-
----
-
-## Для AI-агента: MCP-сервер
-
-Тот же бинарник, скрытый флаг `--mcp`: клиент запускает его дочерним процессом
-и говорит JSON-RPC 2.0 через stdin/stdout. **Ни порта, ни слушателя** — иначе
-в бинарнике появились бы `bind`/`listen`/`accept`, которых в нём нет
-(`nm -u` это показывает). Все инструменты **только на чтение**: агент может
-сказать, что закрыть, но закрыть сам не может.
-
-Cursor (`.cursor/mcp.json`) и Claude Code (`.mcp.json` в корне проекта) берут
-один и тот же фрагмент:
-
-```json
-{
-  "mcpServers": {
-    "macpulse": {
-      "command": "/Applications/MacPulse.app/Contents/MacOS/MacPulse",
-      "args": ["--mcp"]
-    }
-  }
-}
-```
-
-Шесть инструментов: `memory_pressure` (вердикт ядра, а не «свободная память»),
-`compressor_churn` (МБ/с сжатия и распаковки — то, чего не показывает никто),
-`top_memory_apps` (по `phys_footprint`, сгруппировано по ответственному
-приложению), `machine_snapshot`, `capture_holders` (микрофон и камера),
-`network_path` (кто реально несёт трафик; маршрут по умолчанию — обманка).
-Имена процессов и приложений уходят модели; заголовки окон, пути к файлам и
-буфер обмена — нет, и включить это нельзя.
-
----
-
-## Проверить самому
-
-У приложения есть скрытые диагностические режимы — ими же проверялись
-утверждения выше:
-
-```bash
-APP=/Applications/MacPulse.app/Contents/MacOS/MacPulse
-
-$APP --probe                 # все метрики одним дампом, включая churn компрессора
-$APP --cost-log 150          # сколько ядра съел сам MacPulse за 150 с
-$APP --tunnel-probe          # что говорит таблица маршрутизации
-$APP --privacy-probe 60      # живой след микрофона и камеры
-$APP --sound-probe watch 60  # кто держит аудиопоток
-$APP --clipboard-probe       # на приватном pasteboard, ваш буфер не трогает
-$APP --rail-probe 20         # живые секции + держится ли выбранная вкладка
-$APP --render-probe /tmp/mp  # отрисовка островка мимо экрана + перепись пикселей
-$APP --login-probe roundtrip # автозапуск: включить, прочитать ответ, вернуть как было
-$APP --update-probe check    # один настоящий запрос к GitHub, ничего не ставит
-$APP --printer-fuzz          # прогон парсера принтера по всем ломавшим его ответам
-$APP --wing-probe            # совпадают ли нарисованный и кликабельный островок
-$APP --windows-probe         # сколько у приложения процессов и сколько окон
-```
-
----
-
-## In English
-
-MacPulse is a macOS notch-island system monitor. Collapsed,
-it is a single dot coloured by the kernel's memory-pressure verdict; hovering
-expands a 560 × 280 panel that lists only the sections with something to say
-right now — memory pressure with per-app quit buttons, audio, VPN/tunnel
-carrier, clipboard history, next meeting, a 3D-printer status card, and a
-microphone/camera privacy rail.
-
-What makes it different: it measures **memory compressor churn** — the bytes
-per second macOS spends compressing and decompressing pages. On an 8 GB Apple
-Silicon Mac that is the real "you are about to lag" signal, and no shipping
-monitor displays it. MacPulse also says out loud that "free RAM" and "purge
-memory" are the wrong things to look at: free pages are wasted pages, and RAM
-cleaners throw away cache the OS immediately re-reads and re-compresses.
-
-AI agents can read all of this too: `MacPulse --mcp` is a read-only MCP server
-over stdio (no port, no listener) exposing six tools, including the compressor
-churn no other monitor reports. See "Для AI-агента" above for the
-`.mcp.json` fragment.
-
-Install:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/borissharikoff-droid/MacPulse/main/install.sh | bash
-```
-
-The app is ad-hoc signed, not notarised, and since macOS 15 Finder will not
-open such an app at all — the Control-click ▸ Open escape hatch is gone, and
-the only way through is System Settings ▸ Privacy & Security ▸ "Open Anyway".
-Quarantine is applied by whatever downloads the file, and `curl` does not
-apply it, so an installer that fetches the app itself lands a working copy
-with no dialog at all. Same trick as `brew install --cask --no-quarantine`.
-A `.dmg` is attached to every release for anyone who would rather drag it and
-take the Settings trip. No permissions are requested at launch —
-calendar only if you tick "show next meeting", notifications only if you enable
-memory alerts, and Accessibility only the first time you click the grey process
-badge on a memory row to see that app's windows. Refuse any of them and
-everything else still works; refuse Accessibility and the window list says so in
-one line while the per-process memory breakdown under it keeps working. **The
-interface is in Russian only.** macOS 13+, universal binary (Apple Silicon and
-Intel), and the island looks best on a Mac that has a notch (there is a
-menu-bar pill fallback without one).
-
----
-
-## Лицензия
-
-MIT — см. [LICENSE](LICENSE). Делайте с кодом что хотите, гарантий никаких.
-
-Форма выреза взята из
-[DynamicNotchKit](https://github.com/MrKai77/DynamicNotchKit) Kai Azim
-(MIT, © 2024 Kai Azim): `Sources/NotchShape.swift` вендорнут почти дословно,
-часть расширения `NSScreen` в `Sources/NotchGeometry.swift` адаптирована
-оттуда же. Текст лицензии — в шапках обоих файлов.
-
-Как это выкладывается — в [RELEASING.md](RELEASING.md), что менялось — в
-[CHANGELOG.md](CHANGELOG.md).
+<div align="center"><sub>MIT · built for an 8 GB M2 MacBook Air that kept stuttering</sub></div>

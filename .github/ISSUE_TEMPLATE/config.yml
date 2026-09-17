@@ -1,5 +1,5 @@
 blank_issues_enabled: true
 contact_links:
-  - name: Не открывается после установки
-    url: https://github.com/borissharikoff-droid/MacPulse#установка
-    about: macOS ругается на неизвестного разработчика — это ожидаемо, в README есть решение в одну команду.
+  - name: It won't open after installing
+    url: https://github.com/borissharikoff-droid/MacPulse#install
+    about: macOS complains about an unidentified developer — that's expected, and the README has a one-command fix.
