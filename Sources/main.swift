@@ -92,6 +92,13 @@ if CommandLine.arguments.contains("--rail-probe") {
 // «Запускать при входе»: what macOS says about this copy, and — with
 // `roundtrip` — a real register/unregister that restores what it found.
 // See LoginProbe.swift.
+// Frames for the README's animations: real states of the real view tree,
+// rendered offscreen. NOT a screen recording, deliberately — see the header
+// of IslandFilmProbe.swift.
+if CommandLine.arguments.contains("--film-probe") {
+    IslandFilmProbe.run(arguments: CommandLine.arguments)
+}
+
 if CommandLine.arguments.contains("--login-probe") {
     LoginProbe.run(arguments: CommandLine.arguments)
 }

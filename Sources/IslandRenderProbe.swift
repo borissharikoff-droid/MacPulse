@@ -148,7 +148,7 @@ enum IslandRenderProbe {
     /// Rasterise a SwiftUI view at 2x, the way the built-in display draws
     /// it. `cacheDisplay` and not a screen capture: nothing here depends
     /// on the window server, on a Space, or on the screen being awake.
-    private static func render<V: View>(_ view: V, size: CGSize) -> NSBitmapImageRep? {
+    static func render<V: View>(_ view: V, size: CGSize) -> NSBitmapImageRep? {
         let host = NSHostingView(rootView: view)
         host.frame = NSRect(origin: .zero, size: size)
         // SwiftUI builds its tree on the main run loop, so it has to be
@@ -161,7 +161,7 @@ enum IslandRenderProbe {
         return rep
     }
 
-    private static func write(_ rep: NSBitmapImageRep, to path: String) {
+    static func write(_ rep: NSBitmapImageRep, to path: String) {
         guard let data = rep.representation(using: .png, properties: [:]) else {
             print("    could not encode \(path)")
             return
