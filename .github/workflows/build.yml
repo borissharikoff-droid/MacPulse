@@ -1,0 +1,67 @@
+# Проверка сборки и контракта на каждый пуш.
+#
+# ЧТО ЭТО ПРОВЕРЯЕТ, и это не «что код компилируется». Главное здесь —
+# контрактные проверки внутри build.sh: что URLSession живёт ровно в двух
+# файлах, что каждый из них называет только свои хосты, что Network.framework
+# не появился в карте связывания ни в одном срезе, и что сырых сокетов
+# по-прежнему ровно столько, сколько описано в шапке build.sh. Всё это грепы и
+# otool, они работают одинаково на любой машине — поэтому им здесь и место.
+#
+# ЧЕГО ЗДЕСЬ НЕТ И ПОЧЕМУ. Пробники, которые поднимают настоящую IslandModel
+# (--rail-probe, --render-probe), тут не запускаются: они читают SMC, IOReport
+# и HAL, а это железо, которого у виртуалки раннера может просто не быть.
+# Зелёная галочка на выводе «на этой машине живёт одна секция» ничего бы не
+# значила. Такие пробники гоняются на настоящем маке перед релизом — см.
+# RELEASING.md.
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # build.sh по умолчанию пинит SDK из Command Line Tools — на раннере
+      # стоит полный Xcode, и путь другой. Переменная для этого и заведена.
+      - name: Найти SDK
+        run: echo "MACPULSE_SDK=$(xcrun --show-sdk-path)" >> "$GITHUB_ENV"
+
+      - name: Собрать универсально и прогнать контракт
+        run: ./build.sh --universal --no-install
+
+      - name: Обе архитектуры на месте
+        run: |
+          BIN=Build/MacPulse.app/Contents/MacOS/MacPulse
+          ARCHS=$(lipo -archs "$BIN")
+          echo "archs: $ARCHS"
+          case " $ARCHS " in
+            *" arm64 "*) ;;  *) echo "нет среза arm64"; exit 1 ;;
+          esac
+          case " $ARCHS " in
+            *" x86_64 "*) ;; *) echo "нет среза x86_64"; exit 1 ;;
+          esac
+
+      # Чистый парсер, без железа и без экрана: прогон по всем ответам
+      # принтера, которые когда-либо роняли приложение.
+      - name: Фаззинг парсера принтера
+        run: ./Build/MacPulse.app/Contents/MacOS/MacPulse --printer-fuzz
+
+      # Тоже без сети: печатает таблицы сравнения версий и список
+      # разрешённых хостов апдейтера и проверяет их.
+      - name: Таблицы апдейтера
+        run: ./Build/MacPulse.app/Contents/MacOS/MacPulse --update-probe
+
+      - name: Синтаксис установщиков
+        run: |
+          bash -n install.sh
+          bash -n build.sh
+          bash -n release.sh
+          bash -n make-dmg.sh
+          bash -n "dmg-assets/Установить.command"

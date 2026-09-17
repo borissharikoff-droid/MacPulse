@@ -1,26 +1,30 @@
+<div align="center">
+
 # MacPulse
 
-Системный монитор, который живёт в вырезе MacBook. Свёрнутый — одна точка,
-цвет которой равен вердикту ядра о давлении памяти. Наводишь мышь — вырез
-разворачивается в панель 560 × 280, и в ней показано только то, чему прямо
-сейчас есть что сказать.
+**Системный монитор, который живёт в вырезе MacBook.**
+
+![macOS 13+](https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white)
+![Apple Silicon и Intel](https://img.shields.io/badge/Apple%20Silicon-%D0%B8%20Intel-000000)
+![Зависимостей: 0](https://img.shields.io/badge/%D0%B7%D0%B0%D0%B2%D0%B8%D1%81%D0%B8%D0%BC%D0%BE%D1%81%D1%82%D0%B5%D0%B9-0-2ea44f)
+![Лицензия MIT](https://img.shields.io/badge/%D0%BB%D0%B8%D1%86%D0%B5%D0%BD%D0%B7%D0%B8%D1%8F-MIT-blue)
+
+<img src="docs/expanded.png" width="620" alt="Развёрнутая панель MacPulse: давление памяти, приложения по footprint, буфер обмена">
+
+</div>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/borissharikoff-droid/MacPulse/main/install.sh | bash
+```
+
+Свёрнутый — одна точка, цвет которой равен вердикту ядра о давлении памяти.
+Наводишь мышь — вырез разворачивается в панель 560 × 280, и в ней показано
+только то, чему прямо сейчас есть что сказать.
 
 **Главное отличие в одной строке:** MacPulse измеряет *churn компрессора
-памяти* — сколько байт в секунду macOS сжимает и распаковывает. На 8-гигабайтном
-Apple Silicon это и есть настоящий сигнал «сейчас будет тормозить», и его не
-показывает ни один монитор, который можно скачать.
-
----
-
-> ### 📷 Скриншот
->
-> `docs/screenshot.png` — островок развёрнут, видна секция «Память»:
-> уровень давления, «занято из всего», своп и список приложений по
-> `phys_footprint` с кнопкой «Выход» у каждого.
->
-> <!-- Как только файл появится, раскомментировать строку ниже и удалить этот блок:
-> ![MacPulse в вырезе MacBook](docs/screenshot.png)
-> -->
+памяти* — сколько байт в секунду macOS сжимает и распаковывает. На
+8-гигабайтном Apple Silicon это и есть настоящий сигнал «сейчас будет
+тормозить», и его не показывает ни один монитор, который можно скачать.
 
 ---
 
@@ -82,6 +86,10 @@ MacPulse читает счётчики `compressions` и `decompressions` из
 | **Встреча** | Сколько осталось до ближайшей встречи (выключено по умолчанию) |
 | **Рельс приватности** | Кто держит микрофон и включена ли камера |
 
+<img src="docs/windows-popover.png" width="620" alt="Список окон приложения: у каждого окна кнопка «Закрыть», ниже процессы группы без кнопок">
+
+<sup>Данные в этом кадре синтетические — так выглядит попап со списком окон.</sup>
+
 Четыре из них стоят отдельного слова.
 
 **Серый бейдж считает не окна, и это видно.** `[10]` рядом с именем
@@ -126,27 +134,59 @@ MacPulse вместо этого спрашивает у ядра `RTM_GET` на
 
 ## Установка
 
-**Скачать:** [последний релиз](https://github.com/borissharikoff-droid/MacPulse/releases/latest)
-→ `MacPulse-<версия>.dmg`. Открыть, перетащить MacPulse в «Программы».
+```bash
+curl -fsSL https://raw.githubusercontent.com/borissharikoff-droid/MacPulse/main/install.sh | bash
+```
 
-### Первый запуск покажет «неизвестный разработчик» — так и должно быть
+Скачивает последний релиз, проверяет подпись и целостность, кладёт в
+«Программы» и запускает. Занимает секунд десять. **Предупреждения о
+неизвестном разработчике не будет.**
 
-У проекта нет платного сертификата Apple Developer ID ($99/год), приложение
-подписано ad-hoc подписью. Поэтому macOS один раз спросит:
+### Почему через терминал, а не как обычно
 
-1. Откройте **Программы** (Applications) в Finder.
-2. Нажмите на **MacPulse** правой кнопкой (или Control + клик).
-3. В меню выберите **«Открыть»** — именно из меню правой кнопки, двойной клик
-   в этот момент не сработает.
-4. В предупреждении появится кнопка **«Открыть»** — нажмите её.
+У проекта нет платного сертификата Apple Developer ID ($99 в год), поэтому
+приложение подписано ad-hoc подписью. Начиная с macOS 15 такие приложения
+Finder не открывает вообще: старый обход «правой кнопкой ▸ Открыть» Apple
+убрала. Остаётся поход в **Системные настройки ▸ Конфиденциальность и
+безопасность**, вниз до строчки про заблокированное приложение, «Всё равно
+открыть» — три шага в месте, куда никто не заходит, после диалога, который
+говорит, что приложение повреждено. Оно не повреждено.
 
-Дальше приложение открывается обычным способом и больше ничего не спрашивает.
-Если кнопки «Открыть» в окне не оказалось (так бывает на самых новых macOS):
-**Системные настройки → Конфиденциальность и безопасность**, пролистать вниз,
-**«Всё равно открыть»**, потом открыть приложение ещё раз.
+Карантин навешивает не система, а то, **чем** файл скачали: браузер ставит
+метку, `curl` не ставит. Поэтому установщик, который скачивает приложение
+сам, ставит рабочую копию без единого диалога. Ровно так же работает
+`brew install --cask --no-quarantine`.
 
-Внутри DMG лежат `Установить.command` (делает всё это сам) и
-`Если не открывается.txt` с теми же шагами подробнее.
+### Не доверяете `| bash` — и правильно
+
+```bash
+curl -fsSL -O https://raw.githubusercontent.com/borissharikoff-droid/MacPulse/main/install.sh
+less install.sh          # 200 строк, половина из них — комментарии, почему
+bash install.sh
+```
+
+Скрипт не использует `sudo`, не трогает ничего за пределами устанавливаемого
+бандла и удаляет старую копию только после того, как прочитает её
+`CFBundleIdentifier` и убедится, что это действительно MacPulse.
+
+### Или .dmg, если привычнее перетаскивать
+
+[Последний релиз](https://github.com/borissharikoff-droid/MacPulse/releases/latest)
+→ `MacPulse-<версия>.dmg`. Открыть, перетащить в «Программы». Дальше macOS
+один раз откажется его запускать, и это лечится так:
+
+- **macOS 15 и новее:** Системные настройки ▸ Конфиденциальность и
+  безопасность ▸ пролистать вниз ▸ «Всё равно открыть» ▸ открыть приложение
+  ещё раз.
+- **macOS 13–14:** правой кнопкой по MacPulse ▸ «Открыть» ▸ в предупреждении
+  снова «Открыть». Именно из меню правой кнопки: двойной клик в этот момент
+  не сработает.
+
+Внутри DMG лежит `Установить.command`, который делает то же самое, что
+однострочник выше. Но честно: **он может не открыться ровно по той же
+причине** — пометка карантина висит и на нём, и Gatekeeper блокирует такие
+скрипты так же, как приложения. Установка через `curl` этой проблемы не имеет
+в принципе, потому что `curl` пометку не ставит.
 
 ### Или собрать из исходников
 
@@ -159,7 +199,29 @@ cd MacPulse
 Нужны Command Line Tools (`xcode-select --install`). Xcode, SPM, CocoaPods и
 вообще какие-либо зависимости — не нужны: это ~50 плоских файлов `.swift`,
 которые компилирует один вызов `swiftc`. `build.sh` сам пинит SDK и цель
-сборки и проверяет контракт до и после компиляции.
+сборки и проверяет контракт до и после компиляции. Подписывает локальным
+сертификатом, если он есть в связке ключей, иначе ad-hoc — специально
+заводить ничего не нужно.
+
+### Какие маки поддерживаются
+
+macOS 13 Ventura и новее, **Apple Silicon и Intel** — релизный бинарник
+универсальный, обе архитектуры внутри одного файла. Установщик проверяет,
+что нужный срез в скачанном файле действительно есть, и отказывается ставить
+приложение, которое не запустится.
+
+Вырез (notch) не обязателен. На маке без выреза островок живёт в том же
+месте — по центру у верхнего края.
+
+### Удалить
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/borissharikoff-droid/MacPulse/main/install.sh | bash -s -- --uninstall
+```
+
+Убирает приложение, запись автозапуска и свои настройки. Либо просто
+перетащите MacPulse в корзину — тогда останется только запись автозапуска,
+которую macOS сама погасит при следующем входе.
 
 ### Обновления
 
@@ -344,7 +406,10 @@ $APP --tunnel-probe          # что говорит таблица маршру
 $APP --privacy-probe 60      # живой след микрофона и камеры
 $APP --sound-probe watch 60  # кто держит аудиопоток
 $APP --clipboard-probe       # на приватном pasteboard, ваш буфер не трогает
-$APP --rail-probe 20         # сколько секций живо на тихой машине
+$APP --rail-probe 20         # живые секции + держится ли выбранная вкладка
+$APP --render-probe /tmp/mp  # отрисовка островка мимо экрана + перепись пикселей
+$APP --login-probe roundtrip # автозапуск: включить, прочитать ответ, вернуть как было
+$APP --update-probe check    # один настоящий запрос к GitHub, ничего не ставит
 $APP --printer-fuzz          # прогон парсера принтера по всем ломавшим его ответам
 $APP --wing-probe            # совпадают ли нарисованный и кликабельный островок
 $APP --windows-probe         # сколько у приложения процессов и сколько окон
@@ -354,7 +419,7 @@ $APP --windows-probe         # сколько у приложения проце
 
 ## In English
 
-MacPulse is a macOS notch-island system monitor for Apple Silicon. Collapsed,
+MacPulse is a macOS notch-island system monitor. Collapsed,
 it is a single dot coloured by the kernel's memory-pressure verdict; hovering
 expands a 560 × 280 panel that lists only the sections with something to say
 right now — memory pressure with per-app quit buttons, audio, VPN/tunnel
@@ -373,17 +438,28 @@ over stdio (no port, no listener) exposing six tools, including the compressor
 churn no other monitor reports. See "Для AI-агента" above for the
 `.mcp.json` fragment.
 
-Install: download the `.dmg` from
-[Releases](https://github.com/borissharikoff-droid/MacPulse/releases/latest),
-drag to Applications, then **right-click → Open → Open** on first launch (the
-app is ad-hoc signed, not notarised). No permissions are requested at launch —
+Install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/borissharikoff-droid/MacPulse/main/install.sh | bash
+```
+
+The app is ad-hoc signed, not notarised, and since macOS 15 Finder will not
+open such an app at all — the Control-click ▸ Open escape hatch is gone, and
+the only way through is System Settings ▸ Privacy & Security ▸ "Open Anyway".
+Quarantine is applied by whatever downloads the file, and `curl` does not
+apply it, so an installer that fetches the app itself lands a working copy
+with no dialog at all. Same trick as `brew install --cask --no-quarantine`.
+A `.dmg` is attached to every release for anyone who would rather drag it and
+take the Settings trip. No permissions are requested at launch —
 calendar only if you tick "show next meeting", notifications only if you enable
 memory alerts, and Accessibility only the first time you click the grey process
 badge on a memory row to see that app's windows. Refuse any of them and
 everything else still works; refuse Accessibility and the window list says so in
-one line while the per-process memory breakdown under it keeps working. **The interface is in Russian only.** Apple
-Silicon, macOS 13+, and the island looks best on a Mac that has a notch (there
-is a menu-bar pill fallback without one).
+one line while the per-process memory breakdown under it keeps working. **The
+interface is in Russian only.** macOS 13+, universal binary (Apple Silicon and
+Intel), and the island looks best on a Mac that has a notch (there is a
+menu-bar pill fallback without one).
 
 ---
 

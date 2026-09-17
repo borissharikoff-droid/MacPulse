@@ -235,18 +235,29 @@ run /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEW_BUILD" Info.plist
 # ---------------------------------------------------------------------------
 # 2. Build
 #
-# ./build.sh is the only thing that knows the SDK pin, the arm64-apple-macos13.0
-# deployment target and the contract guards (no CFNetwork / Network / Security
-# in the link map, one loopback socket, one PF_ROUTE socket). Release must not
-# reimplement any of that — it calls the same script a normal build calls, so
-# a release binary is bit-for-bit the same kind of thing as a dev binary.
+# ./build.sh is the only thing that knows the SDK pin, the macos13.0 deployment
+# target and the contract guards (no Network.framework in the link map, one
+# loopback socket, one PF_ROUTE socket). Release must not reimplement any of
+# that — it calls the same script a normal build calls, so a release binary is
+# the same kind of thing as a dev binary.
+#
+# --universal, and ONLY here. A release has to run on a friend's 2019 Intel
+# MacBook, and an arm64-only bundle on an Intel Mac does not fail with
+# "unsupported architecture": Finder says «приложение повреждено», which is
+# indistinguishable from a bad download and sends the person looking for the
+# wrong problem. Development builds stay single-slice because the second one
+# doubles a four-minute compile for a machine that is arm64 anyway.
+#
+# --no-install, because a release must not silently replace the copy in
+# /Applications that the developer is running. The staged copy below is the
+# artifact; /Applications is not part of it.
 # ---------------------------------------------------------------------------
 if [ "$NO_BUILD" = "1" ]; then
   step "Skipping the compile (--no-build) — re-using Build/$APP_NAME.app"
   note "the staged copy still gets the freshly bumped Info.plist below"
 else
-  step "Building (./build.sh — SDK pin, deployment target, contract guards)"
-  run ./build.sh
+  step "Building universal (./build.sh — SDK pin, deployment target, contract guards)"
+  run ./build.sh --universal --no-install
 fi
 
 # ---------------------------------------------------------------------------
@@ -260,8 +271,14 @@ fi
 #     that to "MacPulse is damaged and can't be opened" — a dead end for a
 #     non-technical friend. A plain ad-hoc signature gets the classic,
 #     well-trodden "unidentified developer" path instead, which the
-#     right-click -> Открыть steps in dmg-assets/ can actually talk someone
-#     through. Worse-looking signature, far better outcome.
+#     recovery steps in dmg-assets/ can actually talk someone through. A
+#     worse-looking signature with a far better outcome.
+#
+#     Since macOS 15 even that path is narrower — Apple removed right-click
+#     ▸ Открыть for unsigned apps, leaving only System Settings ▸ Приватность
+#     и безопасность ▸ «Всё равно открыть». Which is why install.sh exists and
+#     is the route the README leads with: a file fetched by curl is never
+#     quarantined, so Gatekeeper has nothing to object to in the first place.
 #
 # (b) THE STAGE DIRECTORY MUST ALREADY CONTAIN THE CORRECT FINAL NAME.
 #     `ditto --keepParent` puts whatever the source folder is LITERALLY called

@@ -1,0 +1,51 @@
+name: Что-то работает не так
+description: Островок не появился, не те цифры, приложение закрылось само
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Не нужно извиняться за короткое описание. «Островок не появляется на
+        внешнем мониторе» — это уже полноценный баг-репорт.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: Что произошло
+      placeholder: Навожу мышь на вырез — ничего не открывается.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Версия MacPulse
+      description: Значок в строке меню ▸ верхняя строка меню, либо «Проверить обновления…»
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: mac
+    attributes:
+      label: Мак и версия macOS
+      description: 🍎 ▸ Об этом Mac
+      placeholder: "MacBook Air M1, macOS 15.3"
+    validations:
+      required: true
+
+  - type: textarea
+    id: probe
+    attributes:
+      label: Вывод диагностики (по желанию)
+      description: |
+        Если не трудно — выполните в Терминале и вставьте вывод. Это ускоряет
+        всё в разы. В выводе видно: какие вкладки островка сейчас живые,
+        названия приложений с большим расходом памяти и состояние автозапуска.
+        Паролей, содержимого буфера обмена и названий встреч там нет.
+
+        ```
+        /Applications/MacPulse.app/Contents/MacOS/MacPulse --rail-probe 14
+        /Applications/MacPulse.app/Contents/MacOS/MacPulse --login-probe
+        ```
+      render: text

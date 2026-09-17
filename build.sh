@@ -76,6 +76,42 @@ APP_NAME="MacPulse"
 APP_BUNDLE="$ROOT/Build/$APP_NAME.app"
 BIN_PATH="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
+# ---------------------------------------------------------------------------
+# WHICH ARCHITECTURES
+#
+#   ./build.sh                arm64 only — the development build
+#   ./build.sh --universal    arm64 + x86_64, lipo'd into one binary
+#
+# The default is one slice because it is a 2-4 minute compile and doubling
+# that on every iteration buys the developer nothing: this machine is arm64.
+# RELEASES are built --universal (release.sh passes it), because a friend on
+# a 2019 Intel MacBook downloading an arm64-only build gets "приложение
+# повреждено" from Finder, which is Gatekeeper's way of saying "no slice for
+# this CPU" and is indistinguishable from a real corruption.
+#
+# Measured, not assumed: the x86_64 slice is compiled from the same sources
+# with no #if arch anywhere, and `--probe` and `--rail-probe` are run against
+# it under Rosetta before a release goes out. Page size is read at runtime
+# (vm_page_size), never hardcoded to 16384, which is the one number that
+# would silently differ on Intel.
+# ---------------------------------------------------------------------------
+ARCHS=(arm64)
+INSTALL=1
+for arg in "$@"; do
+  case "$arg" in
+    --universal) ARCHS=(arm64 x86_64) ;;
+    --arm64)     ARCHS=(arm64) ;;
+    # Build and check, but leave /Applications alone. Used by CI, and by
+    # release.sh, which stages its own copy under its own signature.
+    --no-install) INSTALL=0 ;;
+    *)
+      echo "error: unknown argument '$arg'" >&2
+      echo "usage: ./build.sh [--universal|--arm64] [--no-install]" >&2
+      exit 1 ;;
+  esac
+done
+if [ "${MACPULSE_UNIVERSAL:-0}" = "1" ]; then ARCHS=(arm64 x86_64); fi
+
 echo "==> Compiling..."
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
@@ -328,16 +364,35 @@ fi
 # cannot actually run on. 13.0 matches Info.plist and is enough for
 # everything used here (NSScreen.safeAreaInsets / auxiliaryTopLeftArea are
 # macOS 12+, SMAppService is 13+).
-DEPLOY_TARGET="arm64-apple-macos13.0"
+MIN_OS="13.0"
 
-swiftc -O \
-  -sdk "$SDK" \
-  -target "$DEPLOY_TARGET" \
-  -o "$BIN_PATH" \
-  "$ROOT"/Sources/*.swift \
-  -framework AppKit -framework ServiceManagement -framework IOKit \
-  -framework CoreAudio -framework CoreMediaIO \
-  -framework UserNotifications -framework EventKit
+# One slice. Everything that differs between architectures is the -target
+# triple and nothing else, so there is exactly one copy of the flags.
+build_slice() {   # $1 = arch, $2 = output path
+  swiftc -O \
+    -sdk "$SDK" \
+    -target "$1-apple-macos$MIN_OS" \
+    -o "$2" \
+    "$ROOT"/Sources/*.swift \
+    -framework AppKit -framework ServiceManagement -framework IOKit \
+    -framework CoreAudio -framework CoreMediaIO \
+    -framework UserNotifications -framework EventKit
+}
+
+if [ "${#ARCHS[@]}" -eq 1 ]; then
+  echo "    ${ARCHS[0]}"
+  build_slice "${ARCHS[0]}" "$BIN_PATH"
+else
+  SLICES=()
+  for a in "${ARCHS[@]}"; do
+    echo "    $a"
+    build_slice "$a" "$ROOT/Build/.slice-$a"
+    SLICES+=("$ROOT/Build/.slice-$a")
+  done
+  lipo -create "${SLICES[@]}" -output "$BIN_PATH"
+  rm -f "${SLICES[@]}"
+  echo "    lipo -> $(lipo -archs "$BIN_PATH")"
+fi
 
 # ============================================================================
 # CONTRACT GUARD 3 (link side). This check used to assert the strongest thing
@@ -381,27 +436,37 @@ swiftc -O \
 # Note that '/Network\.framework/' does not match '/CFNetwork.framework/' — the
 # leading slash is load-bearing, since CFNetwork's path segment is "CFNetwork".
 # ============================================================================
-if LEAK=$(otool -L "$BIN_PATH" | grep -E '/Network\.framework/'); then
-  echo "error: CONTRACT — Network.framework is in the link map:" >&2
-  echo "$LEAK" >&2
-  echo "       NWConnection can reach any host and port with nothing to grep." >&2
-  echo "       MacPulse's only permitted network client is URLSession in" >&2
-  echo "       Sources/Updater.swift, held to three GitHub hosts." >&2
-  rm -f "$BIN_PATH"
-  exit 1
-fi
-if ! otool -L "$BIN_PATH" | grep -qE '/CFNetwork\.framework/'; then
-  echo "error: CONTRACT — CFNetwork is NOT in the link map." >&2
-  echo "       This build expects it, because Sources/Updater.swift does HTTPS." >&2
-  echo "       If the self-updater was removed on purpose, MacPulse is back to a" >&2
-  echo "       STRICTER contract than the one documented at the top of this file:" >&2
-  echo "       restore the old assertion (no CFNetwork/Network/Security) and say so" >&2
-  echo "       in the contract block, rather than deleting this check." >&2
-  rm -f "$BIN_PATH"
-  exit 1
-fi
-echo "==> Contract OK: no Network.framework. CFNetwork present (expected — the updater)."
-otool -L "$BIN_PATH" | grep -E '/(CFNetwork|Security)\.framework/' | sed 's/^/    /'
+#
+# PER ARCHITECTURE, and that matters on a universal build: `otool -L` with no
+# -arch reports only the FIRST slice, so a fat binary whose x86_64 half linked
+# something the arm64 half did not would sail straight through a guard written
+# the obvious way.
+for a in "${ARCHS[@]}"; do
+  if LEAK=$(otool -arch "$a" -L "$BIN_PATH" | grep -E '/Network\.framework/'); then
+    echo "error: CONTRACT — Network.framework is in the $a link map:" >&2
+    echo "$LEAK" >&2
+    echo "       NWConnection can reach any host and port with nothing to grep." >&2
+    echo "       MacPulse's only permitted network client is URLSession in" >&2
+    echo "       Sources/Updater.swift, held to three GitHub hosts." >&2
+    rm -f "$BIN_PATH"
+    exit 1
+  fi
+  if ! otool -arch "$a" -L "$BIN_PATH" | grep -qE '/CFNetwork\.framework/'; then
+    echo "error: CONTRACT — CFNetwork is NOT in the $a link map." >&2
+    echo "       This build expects it, because Sources/Updater.swift does HTTPS." >&2
+    echo "       If the self-updater was removed on purpose, MacPulse is back to a" >&2
+    echo "       STRICTER contract than the one documented at the top of this file:" >&2
+    echo "       restore the old assertion (no CFNetwork/Network/Security) and say so" >&2
+    echo "       in the contract block, rather than deleting this check." >&2
+    rm -f "$BIN_PATH"
+    exit 1
+  fi
+done
+echo "==> Contract OK (${ARCHS[*]}): no Network.framework. CFNetwork present (expected — the updater)."
+for a in "${ARCHS[@]}"; do
+  otool -arch "$a" -L "$BIN_PATH" \
+    | grep -E '/(CFNetwork|Security)\.framework/' | sed "s|^|    $a |"
+done
 
 cp "$ROOT/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 
@@ -424,10 +489,28 @@ cp "$ROOT/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 # designated requirement stays the same across rebuilds — matches the
 # identity CmdTabSwitcher already uses; one local dev cert can sign
 # multiple different apps fine.
+#
+# FALLS BACK TO AD-HOC, and that is not a detail. This identity exists in one
+# keychain on one machine. Anybody who clones this repo — or any CI runner —
+# has no such certificate, and `codesign --sign` on a missing identity fails
+# the build at the very last step, after a four-minute compile, with an error
+# naming a certificate they have never heard of and have no reason to create.
+# Ad-hoc signing is what releases ship with anyway, so the fallback is not a
+# degraded build; it is the same signature strangers get.
 SIGN_ID="CmdTabSwitcher Local Dev"
+if ! security find-identity -v -p codesigning 2>/dev/null | grep -qF "$SIGN_ID"; then
+  SIGN_ID="-"
+  echo "==> No local signing identity in the keychain — signing ad-hoc."
+  echo "    (Expected on a fresh clone and on CI. Releases are ad-hoc too.)"
+fi
 
 echo "==> Code-signing ($SIGN_ID)..."
 codesign --force --deep --sign "$SIGN_ID" "$APP_BUNDLE"
+
+if [ "$INSTALL" = "0" ]; then
+  echo "==> Done (not installed): $APP_BUNDLE"
+  exit 0
+fi
 
 echo "==> Installing to /Applications..."
 rm -rf "/Applications/$APP_NAME.app"
