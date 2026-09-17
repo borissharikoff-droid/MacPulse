@@ -4,6 +4,7 @@
 
 **Системный монитор, который живёт в вырезе MacBook.**
 
+[![build](https://github.com/borissharikoff-droid/MacPulse/actions/workflows/build.yml/badge.svg)](https://github.com/borissharikoff-droid/MacPulse/actions/workflows/build.yml)
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white)
 ![Apple Silicon и Intel](https://img.shields.io/badge/Apple%20Silicon-%D0%B8%20Intel-000000)
 ![Зависимостей: 0](https://img.shields.io/badge/%D0%B7%D0%B0%D0%B2%D0%B8%D1%81%D0%B8%D0%BC%D0%BE%D1%81%D1%82%D0%B5%D0%B9-0-2ea44f)
