@@ -107,6 +107,35 @@ struct PrinterReading: Equatable {
 /// the correct and by far the most common state.
 enum PrinterFeature {
 
+    /// The stage badge's text.
+    ///
+    /// The panel sends TWO words for the same thing: a raw `stage` in its
+    /// own wire vocabulary (RUNNING, PAUSE, FINISH…) and `stageRu`, a
+    /// Russian label it has already translated for us. Preferring
+    /// `stageRu` unconditionally — which is what the section did — puts a
+    /// Russian word in an English UI, and no amount of localising THIS
+    /// app fixes it, because the translation arrives over the wire from
+    /// something that does not know what language MacPulse is in.
+    ///
+    /// So in English the raw stage is mapped here, and `stageRu` is used
+    /// only when the panel sent no raw stage at all.
+    static func stageLabel(_ reading: PrinterReading) -> String {
+        if !Lang.isEnglish { return reading.stageRu ?? reading.stage ?? "—" }
+        guard let raw = reading.stage else { return reading.stageRu ?? "—" }
+        switch raw.uppercased() {
+        case "IDLE":    return "idle"
+        case "PREPARE": return "preparing"
+        case "SLICING": return "slicing"
+        case "RUNNING": return "printing"
+        case "PAUSE":   return "paused"
+        case "FINISH":  return "finished"
+        case "FAILED":  return "failed"
+        // An unknown stage is shown as the panel spelled it. Better a word
+        // nobody translated than a dash where something is happening.
+        default:        return raw
+        }
+    }
+
     // MARK: - Parsing
 
     /// Turn the panel's JSON envelope into a reading, or nil.
@@ -267,10 +296,10 @@ enum PrinterFeature {
     /// return is therefore "9ч59" at 23.4 pt, measured.
     static func remaining(_ minutes: Int?) -> String {
         guard let minutes else { return "—" }
-        if minutes < 60 { return "\(minutes)м" }
+        if minutes < 60 { return tr("\(minutes)м", "\(minutes)m") }
         let hours = minutes / 60
-        if hours >= 10 { return "\(hours)ч" }
-        return "\(hours)ч\(String(format: "%02d", minutes % 60))"
+        if hours >= 10 { return tr("\(hours)ч", "\(hours)h") }
+        return tr("\(hours)ч\(String(format: "%02d", minutes % 60))", "\(hours)h\(String(format: "%02d", minutes % 60))")
     }
 
     /// Wall-clock ETA — "готово 16:42". Far more useful than "83 минуты",

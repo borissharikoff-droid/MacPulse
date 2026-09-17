@@ -399,12 +399,12 @@ enum VibeStatusFile {
             return nil
         }
         guard let total = seconds(max(0, elapsed)) else { return nil }
-        if total < 60 { return "<1 мин" }
+        if total < 60 { return tr("<1 мин", "<1 min") }
         let minutes = total / 60
-        if minutes < 60 { return "\(minutes) мин" }
+        if minutes < 60 { return tr("\(minutes) мин", "\(minutes) min") }
         let hours = minutes / 60
-        if hours < 24 { return String(format: "%d ч %02d мин", hours, minutes % 60) }
-        return "\(hours / 24) д \(hours % 24) ч"
+        if hours < 24 { return String(format: tr("%d ч %02d мин", "%d h %02d min"), hours, minutes % 60) }
+        return tr("\(hours / 24) д \(hours % 24) ч", "\(hours / 24) d \(hours % 24) h")
     }
 
     /// The ONLY Double -> Int conversion in this file, and it is the
@@ -586,7 +586,7 @@ final class VibeFeature: ObservableObject {
         if let duration = session.duration { parts.append(duration) }
         // Comma, not " · ": the footer already joins its clauses with
         // " · " and a clause that reuses the separator reads as three.
-        return "Сессия: " + parts.joined(separator: ", ")
+        return tr("Сессия: ", "Session: ") + parts.joined(separator: ", ")
     }
 
     // MARK: The sample
@@ -720,7 +720,7 @@ extension IslandSectionID {
 extension IslandSection {
     static let vibe = IslandSection(
         id: .vibe,
-        chipTitle: "Сессия",
+        chipTitle: tr("Сессия", "Session"),
         chipSymbol: "curlybraces",
         // Cheap and pure: one Optional compare against a value the
         // watcher already published onto the main thread. No syscall, no

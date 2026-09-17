@@ -125,11 +125,11 @@ private enum TunnelWords {
     static func state(_ state: TunnelToolState) -> String {
         switch state {
         // NOT "выключен". The application is not on this machine.
-        case .notInstalled:    return "не установлен"
-        case .installedIdle:   return "установлен, простаивает"
-        case .carryingTraffic: return "несёт трафик"
-        case .upNotCarrying:   return "поднят, не несёт"
-        case .cannotDetermine: return "не удалось определить"
+        case .notInstalled:    return tr("не установлен", "Not installed")
+        case .installedIdle:   return tr("установлен, простаивает", "Installed, idle")
+        case .carryingTraffic: return tr("несёт трафик", "Carries traffic")
+        case .upNotCarrying:   return tr("поднят, не несёт", "Up, not carrying")
+        case .cannotDetermine: return tr("не удалось определить", "Can't determine")
         }
     }
 
@@ -147,8 +147,8 @@ private enum TunnelWords {
     static func headline(_ m: TunnelMetrics) -> String {
         guard let carrier = m.carrier else { return "—" }
         if let tool = m.carryingTool { return tool.displayName }
-        if carrier.isTunnel { return "Неизвестный туннель" }
-        return "Без туннеля"
+        if carrier.isTunnel { return tr("Неизвестный туннель", "Unknown tunnel") }
+        return tr("Без туннеля", "No tunnel")
     }
 
     static func headlineTint(_ m: TunnelMetrics) -> Color {
@@ -160,8 +160,8 @@ private enum TunnelWords {
 
     /// The badge beside the headline.
     static func headlineBadge(_ m: TunnelMetrics) -> String {
-        guard let carrier = m.carrier else { return "НЕТ ЗАМЕРА" }
-        return carrier.isTunnel ? "НЕСЁТ ТРАФИК" : "ПРЯМОЕ СОЕДИНЕНИЕ"
+        guard let carrier = m.carrier else { return tr("НЕТ ЗАМЕРА", "NOT MEASURED") }
+        return carrier.isTunnel ? tr("НЕСЁТ ТРАФИК", "CARRYING TRAFFIC") : tr("ПРЯМОЕ СОЕДИНЕНИЕ", "DIRECT CONNECTION")
     }
 
     /// The carrier's interface, and its MTU because it is a number and not
@@ -208,8 +208,8 @@ private enum TunnelWords {
     /// nil whenever the chip is not live, so the two can never disagree.
     static func footerClause(_ m: TunnelMetrics?) -> String? {
         guard let m, m.deservesStripSlot == true else { return nil }
-        guard let tool = m.carryingTool else { return "Туннель: неизвестный" }
-        return "Туннель: \(tool.displayName)"
+        guard let tool = m.carryingTool else { return tr("Туннель: неизвестный", "Tunnel: unknown") }
+        return tr("Туннель: \(tool.displayName)", "Tunnel: \(tool.displayName)")
     }
 }
 
@@ -259,7 +259,7 @@ private struct TunnelSectionView: View {
             } else {
                 // Reachable only in the frame or two before the first
                 // sample lands, or after the watcher has stopped.
-                Text("Туннели ещё не измерены")
+                Text(tr("Туннели ещё не измерены", "Tunnels not measured yet"))
                     .font(.system(size: 11))
                     .foregroundStyle(Color(white: 0.45))
             }
@@ -300,7 +300,7 @@ private struct TunnelSectionView: View {
                 .background(RoundedRectangle(cornerRadius: 4)
                     .fill(TunnelWords.headlineTint(m).opacity(0.14)))
             if m.routeIsSplit {
-                Text("РАСЩЕПЛЁННЫЙ МАРШРУТ")
+                Text(tr("РАСЩЕПЛЁННЫЙ МАРШРУТ", "SPLIT ROUTE"))
                     .font(.system(size: 9, weight: .semibold))
                     .tracking(0.5)
                     .foregroundStyle(IslandPalette.warning)
@@ -324,7 +324,7 @@ private struct TunnelSectionView: View {
         // which side of the tunnel it is on. Everything else this line
         // could have said is in GeoLookup.swift.
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text("СНАРУЖИ")
+            Text(tr("СНАРУЖИ", "OUTSIDE"))
                 .font(.system(size: 9, weight: .semibold))
                 .tracking(0.6)
                 .foregroundStyle(Color(white: 0.38))
@@ -394,13 +394,13 @@ private struct TunnelSectionView: View {
                     .foregroundStyle(IslandPalette.warning)
                     .lineLimit(1)
                 Spacer(minLength: 8)
-                NoteButton(title: "Всё равно открыть", tint: IslandPalette.warning) {
+                NoteButton(title: tr("Всё равно открыть", "Open anyway"), tint: IslandPalette.warning) {
                     if let status = m.status(of: tool) {
                         armed = nil
                         TunnelActions.open(status)
                     }
                 }
-                NoteButton(title: "Отмена", tint: Color(white: 0.55)) { armed = nil }
+                NoteButton(title: tr("Отмена", "Cancel"), tint: Color(white: 0.55)) { armed = nil }
             }
             .frame(height: 18)
         } else {
@@ -462,7 +462,7 @@ private struct TunnelToolRow: View {
             // off", which is the exact misstatement this section exists to
             // avoid.
             if TunnelActions.openTarget(status) != nil {
-                RowButton(title: isArmed ? "Подтвердите ниже" : "Открыть",
+                RowButton(title: isArmed ? tr("Подтвердите ниже", "Confirm below") : tr("Открыть", "Open"),
                           tint: isArmed ? IslandPalette.warning : Color(white: 0.62),
                           action: onOpen)
             }
@@ -480,10 +480,10 @@ private struct TunnelToolRow: View {
         // days on a machine where Amnezia is idle, so "app is running" must
         // never sit next to the verdict where it could be read as evidence.
         if let running = status.isAppRunning {
-            parts.append(running ? "Приложение запущено." : "Приложение не запущено.")
+            parts.append(running ? tr("Приложение запущено.", "App is running.") : tr("Приложение не запущено.", "App is not running."))
         }
         if let caution = status.tool.launchCaution {
-            parts.append("Запуск: \(caution)")
+            parts.append(tr("Запуск: \(caution)", "Launch: \(caution)"))
         }
         return parts.joined(separator: " ")
     }
@@ -543,7 +543,7 @@ private struct NoteButton: View {
 extension IslandSection {
     static let tunnel = IslandSection(
         id: .tunnel,
-        chipTitle: "Туннель",
+        chipTitle: tr("Туннель", "Tunnel"),
         chipSymbol: "arrow.triangle.branch",
         // Cheap and pure: one Optional Bool read off a @Published property
         // the watcher already wrote. No syscall, no I/O — see

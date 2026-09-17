@@ -83,9 +83,9 @@ private struct WindowRowView: View {
     /// and ARE closed by «Закрыть остальные» — skipping them silently
     /// would make the count a lie — so the state is named instead.
     private var tag: String? {
-        if row.isMain { return "главное" }
-        if row.isMinimized { return "свёрнуто" }
-        if row.isFullScreen { return "во весь экран" }
+        if row.isMain { return tr("главное", "main") }
+        if row.isMinimized { return tr("свёрнуто", "minimized") }
+        if row.isFullScreen { return tr("во весь экран", "full screen") }
         return nil
     }
 
@@ -109,7 +109,7 @@ private struct WindowRowView: View {
             Spacer(minLength: 6)
 
             if row.canClose {
-                SmallButton(title: "Закрыть", tint: Color(white: 0.8), onTap: onClose)
+                SmallButton(title: tr("Закрыть", "Close"), tint: Color(white: 0.8), onTap: onClose)
             } else {
                 // No close button on the window itself — a sheet, a panel.
                 // A dash, never a button that would do nothing.
@@ -186,8 +186,8 @@ struct WindowPopover: View {
     }
 
     private var windowCountLine: String {
-        guard let count = state.scan.count else { return "окна не прочитаны" }
-        return "окон: \(count)"
+        guard let count = state.scan.count else { return tr("окна не прочитаны", "windows not read") }
+        return tr("окон: \(count)", "windows: \(count)")
     }
 
     /// TWO STEPS, the same shape as the row's own Quit -> force-quit flow.
@@ -195,11 +195,11 @@ struct WindowPopover: View {
     /// closes. One stray click can never close nine windows.
     @ViewBuilder private var bulkButton: some View {
         if let promised = state.armedOthers {
-            SmallButton(title: "Точно? Закрыть \(promised)",
+            SmallButton(title: tr("Точно? Закрыть \(promised)", "Sure? Close \(promised)"),
                         tint: IslandPalette.critical) { model.closeOtherWindows() }
                 .help(keepsHint)
         } else if others > 0 {
-            SmallButton(title: "Закрыть остальные (\(others))",
+            SmallButton(title: tr("Закрыть остальные (\(others))", "Close others (\(others))"),
                         tint: Color(white: 0.85)) { model.armCloseOtherWindows() }
                 .help(keepsHint)
         }
@@ -210,7 +210,7 @@ struct WindowPopover: View {
     /// number and the user has asked twice for fewer words in this panel.
     private var keepsHint: String {
         let main = windows.first(where: { $0.isMain })?.title
-        return "Останется одно окно: " + (main ?? "—")
+        return tr("Останется одно окно: ", "One window will remain: ") + (main ?? "—")
     }
 
     // MARK: A. Windows
@@ -223,19 +223,20 @@ struct WindowPopover: View {
             // offers the one useful button. It never asks again by itself
             // — see AppWindowList.requestTrustOnce.
             VStack(alignment: .leading, spacing: 6) {
-                Text("Список окон закрыт без «Универсального доступа»")
+                Text(tr("Список окон закрыт без «Универсального доступа»",
+                        "Window list is closed without Accessibility access"))
                     .font(.system(size: 10.5))
                     .foregroundStyle(Color(white: 0.62))
-                SmallButton(title: "Открыть настройки", tint: Color(white: 0.85)) {
+                SmallButton(title: tr("Открыть настройки", "Open settings"), tint: Color(white: 0.85)) {
                     AppWindowList.openAccessibilitySettings()
                 }
             }
             .padding(.horizontal, 6)
             .padding(.top, 4)
         case .notResponding:
-            popoverNote("Приложение не отвечает")
+            popoverNote(tr("Приложение не отвечает", "App is not responding"))
         case .noSuchProcess:
-            popoverNote("Процесс закрыт")
+            popoverNote(tr("Процесс закрыт", "Process has quit"))
         case .unresolved:
             // Counted, but not readable — see WindowScanFailure.unresolved.
             // NO EXPLANATION ON THE PLATE, on purpose: the cause measured
@@ -244,10 +245,10 @@ struct WindowPopover: View {
             // cause would be a guess printed as a fact. It says what is
             // true and offers the one button that could help.
             VStack(alignment: .leading, spacing: 6) {
-                Text("Окна не читаются")
+                Text(tr("Окна не читаются", "Windows cannot be read"))
                     .font(.system(size: 10.5))
                     .foregroundStyle(Color(white: 0.62))
-                SmallButton(title: "Открыть настройки", tint: Color(white: 0.85)) {
+                SmallButton(title: tr("Открыть настройки", "Open settings"), tint: Color(white: 0.85)) {
                     AppWindowList.openAccessibilitySettings()
                 }
             }
@@ -257,7 +258,7 @@ struct WindowPopover: View {
             if windows.isEmpty {
                 // A MEASURED ZERO, and the most interesting answer this
                 // popover gives: a ten-process app with no windows at all.
-                popoverNote("Окон нет")
+                popoverNote(tr("Окон нет", "No windows"))
             } else {
                 ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 0) {
@@ -285,10 +286,11 @@ struct WindowPopover: View {
     /// button would be the footgun; see this file's header.
     private var processCaption: some View {
         HStack(spacing: 4) {
-            Text("Процессы \(state.processes.count)")
+            Text(tr("Процессы \(state.processes.count)", "Processes \(state.processes.count)"))
                 .font(.system(size: 9, weight: .medium).monospacedDigit())
                 .foregroundStyle(Color(white: 0.55))
-            Text("— помощники, не окна: завершишь — потеряешь несохранённое, и они вернутся")
+            Text(tr("— помощники, не окна: завершишь — потеряешь несохранённое, и они вернутся",
+                    "— helpers, not windows: quit one and you lose unsaved work, and it comes back"))
                 .font(.system(size: 8.5))
                 .foregroundStyle(Color(white: 0.36))
                 .lineLimit(1)

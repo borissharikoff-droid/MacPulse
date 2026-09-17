@@ -2,6 +2,33 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · versioning: [SemVer](https://semver.org/).
 
+## Unreleased
+
+### English
+
+- **The interface speaks English as well as Russian**, chosen in the menu
+  bar under «Язык · Language» — that item is deliberately bilingual, because
+  the one person who needs it is looking at an app in a language they cannot
+  read. «Same as system» follows macOS; the other two override it.
+- Switching takes effect immediately. The menu is rebuilt and the island
+  panel is torn down and redrawn, rather than the language being threaded
+  through every view — a view that was forgotten would keep its old
+  language and nothing would point at it.
+- Rail chip titles and the update menu item lived in `static let`s, which
+  Swift evaluates exactly once. They were frozen in whatever language the
+  app launched in while everything around them switched. `chipTitle` is now
+  an `@autoclosure` behind a computed property, so no registration site
+  changed and every read re-resolves.
+- The printer badge maps the panel's raw stage (`RUNNING`, `PAUSE`,
+  `FINISH`…) to English instead of using the Russian label the panel sends
+  over the wire. That label could never have followed this app's language,
+  because it is written by something that does not know what language this
+  app is in.
+- Probe output (`--probe`, `--rail-probe` and the rest) stays Russian on
+  purpose: it is a developer tool read next to the source that printed it,
+  and translating it would double the text that has to stay in step with
+  the code, for nobody.
+
 ## 1.0.0
 
 First public release.

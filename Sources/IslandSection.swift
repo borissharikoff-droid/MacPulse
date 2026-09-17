@@ -85,9 +85,28 @@ extension IslandSectionID {
 /// type cannot do without more ceremony than the job is worth.
 struct IslandSection: Identifiable {
     let id: IslandSectionID
+
     /// Rail chip label. Two words at most — the rail is 28 pt tall and
     /// 560 pt wide and may have to hold five of these.
-    let chipTitle: String
+    ///
+    /// EVALUATED ON EVERY READ, which is why it is an `@autoclosure`
+    /// behind a computed property rather than the stored `String` it
+    /// looks like at the call site.
+    ///
+    /// Every section registers itself from a `static let`, so a stored
+    /// title would be resolved exactly once, at first touch, in whatever
+    /// language was current then — and the six rail chips would stay in
+    /// the launch language for the life of the process while the rest of
+    /// the panel followed the switch. Three separate reviews of this
+    /// change found that independently, which is a good sign it would
+    /// have shipped.
+    ///
+    /// `footerSummary` and `makeBody` never had the problem: they were
+    /// already closures, so their `tr(...)` calls run when the panel
+    /// draws.
+    var chipTitle: String { chipTitleProvider() }
+    private let chipTitleProvider: () -> String
+
     /// SF Symbol name for the chip. Empty string for "no icon".
     let chipSymbol: String
     /// Cheap and pure. See the rules above.
@@ -96,6 +115,24 @@ struct IslandSection: Identifiable {
     let footerSummary: (IslandModel) -> String?
     /// The 560 x 186 body.
     let makeBody: (IslandModel) -> AnyView
+
+    /// Spelled out rather than left to the memberwise initialiser, only so
+    /// that `chipTitle` can be `@autoclosure`. Argument order and labels
+    /// are exactly what the memberwise init had, so no registration site
+    /// changes.
+    init(id: IslandSectionID,
+         chipTitle: @autoclosure @escaping () -> String,
+         chipSymbol: String,
+         hasState: @escaping (IslandModel) -> Bool,
+         footerSummary: @escaping (IslandModel) -> String?,
+         makeBody: @escaping (IslandModel) -> AnyView) {
+        self.id = id
+        self.chipTitleProvider = chipTitle
+        self.chipSymbol = chipSymbol
+        self.hasState = hasState
+        self.footerSummary = footerSummary
+        self.makeBody = makeBody
+    }
 }
 
 /// The rail's contents, in rail order.

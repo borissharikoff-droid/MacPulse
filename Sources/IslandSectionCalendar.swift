@@ -75,7 +75,7 @@ enum MeetingFeature {
     /// "14:30 – 15:30", or just "14:30" when EventKit gave no end date.
     /// An all-day event has no meaningful interval and says so.
     static func interval(_ event: CalendarEvent) -> String {
-        if event.isAllDay { return "весь день" }
+        if event.isAllDay { return tr("весь день", "all day") }
         guard let end = event.endDate else { return CalendarFmt.clock(event.startDate) }
         return CalendarFmt.clock(event.startDate) + " – " + CalendarFmt.clock(end)
     }
@@ -99,14 +99,14 @@ enum MeetingFeature {
     /// far ahead, and when. Every clause is a measured fact off the
     /// snapshot; none of them is the title.
     static func footnote(_ snapshot: CalendarSnapshot) -> String {
-        var parts = [plural(snapshot.calendarCount, "календарь", "календаря", "календарей")]
+        var parts = [plural(snapshot.calendarCount, tr("календарь", "calendar"), tr("календаря", "calendars"), tr("календарей", "calendars"))]
         let hours = Int((snapshot.horizon / 3600).rounded())
-        if hours > 0 { parts.append("горизонт \(hours) ч") }
-        parts.append("обновлено " + CalendarFmt.clock(snapshot.lastQueryAt))
+        if hours > 0 { parts.append(tr("горизонт \(hours) ч", "horizon \(hours) h")) }
+        parts.append(tr("обновлено ", "updated ") + CalendarFmt.clock(snapshot.lastQueryAt))
         // candidateCount counts the next meeting too, so only a SECOND
         // one is worth mentioning.
         if let n = snapshot.candidateCount, n > 1 {
-            parts.append("дальше " + plural(n - 1, "встреча", "встречи", "встреч"))
+            parts.append(tr("дальше ", "then ") + plural(n - 1, tr("встреча", "meeting"), tr("встречи", "meetings"), tr("встреч", "meetings")))
         }
         return parts.joined(separator: " · ")
     }
@@ -188,8 +188,8 @@ struct MeetingStripSlot: View {
     /// Interpolation is not overloaded the same way; each `+=` is its own
     /// small problem. Same string, and now it type-checks in nothing.
     private var tooltip: String {
-        var line = "Встреча через \(CalendarFmt.countdown(event))"
-        line += " · начало в \(CalendarFmt.clock(event.startDate))"
+        var line = tr("Встреча через \(CalendarFmt.countdown(event))", "Meeting in \(CalendarFmt.countdown(event))")
+        line += tr(" · начало в \(CalendarFmt.clock(event.startDate))", " · starts at \(CalendarFmt.clock(event.startDate))")
         if let calendar = event.calendarTitle { line += " · \(calendar)" }
         return line
     }
@@ -230,7 +230,7 @@ private struct CalendarSectionView: View {
                 .fill(tint)
                 .frame(width: 9, height: 9)
                 .overlay(Circle().stroke(Color(white: 0.3), lineWidth: 0.5))
-            Text((event.calendarTitle ?? "без календаря").uppercased())
+            Text((event.calendarTitle ?? tr("без календаря", "no calendar")).uppercased())
                 .font(.system(size: 9, weight: .semibold))
                 .tracking(0.5)
                 .foregroundStyle(Color(white: 0.5))
@@ -266,7 +266,7 @@ private struct CalendarSectionView: View {
                     Text(CalendarFmt.clock(event.startDate))
                         .font(.system(size: 19, weight: .semibold).monospacedDigit())
                         .foregroundStyle(.white)
-                    Text("начало")
+                    Text(tr("начало", "start"))
                         .font(.system(size: 9))
                         .foregroundStyle(Color(white: 0.45))
                 }
@@ -291,7 +291,7 @@ private struct CalendarSectionView: View {
                 // MetricsEngine while it is open, so it ticks without the
                 // engine publishing anything.
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Text("через")
+                    Text(tr("через", "in"))
                         .font(.system(size: 11))
                         .foregroundStyle(Color(white: 0.5))
                     Text(CalendarFmt.countdown(event))
@@ -341,25 +341,25 @@ private struct CalendarSectionView: View {
     /// flag travels in the value, so the view tells the truth about it
     /// rather than counting down to midnight.
     private func badgeText(_ event: CalendarEvent) -> String? {
-        if event.isAllDay { return "ВЕСЬ ДЕНЬ" }
-        if event.isImminent { return "СКОРО" }
+        if event.isAllDay { return tr("ВЕСЬ ДЕНЬ", "ALL DAY") }
+        if event.isImminent { return tr("СКОРО", "SOON") }
         return nil
     }
 
     /// An event with no title is not an error and gets no "—": it is a
     /// real thing people put in calendars, and it still has a time.
     private func titleLine(_ event: CalendarEvent) -> String {
-        guard let title = event.title, !title.isEmpty else { return "Без названия" }
+        guard let title = event.title, !title.isEmpty else { return tr("Без названия", "No title") }
         return title
     }
 
     private func windowNote(_ event: CalendarEvent) -> String {
-        guard let remaining = event.secondsUntilStart() else { return "началась" }
+        guard let remaining = event.secondsUntilStart() else { return tr("началась", "started") }
         let window = event.imminentWindow
         guard window > 0 else { return "" }
-        if remaining <= window { return "в окне \(Int((window / 60).rounded())) мин" }
+        if remaining <= window { return tr("в окне \(Int((window / 60).rounded())) мин", "in \(Int((window / 60).rounded())) min window") }
         let untilWindow = Int(((remaining - window) / 60).rounded(.up))
-        return "окно через \(untilWindow) мин"
+        return tr("окно через \(untilWindow) мин", "window in \(untilWindow) min")
     }
 
     // ---- there is no meeting: the normal state on this machine ----
@@ -367,7 +367,7 @@ private struct CalendarSectionView: View {
     @ViewBuilder private var empty: some View {
         let words = emptyWords(model.calendar.status)
 
-        Text("БЛИЖАЙШАЯ ВСТРЕЧА")
+        Text(tr("БЛИЖАЙШАЯ ВСТРЕЧА", "NEXT MEETING"))
             .font(.system(size: 9, weight: .semibold))
             .tracking(0.5)
             .foregroundStyle(Color(white: 0.4))
@@ -406,23 +406,23 @@ private struct CalendarSectionView: View {
         switch status {
         case .ready:
             let hours = Int((model.calendar.horizon / 3600).rounded())
-            return ("Ничего не запланировано",
-                    ["В ближайшие \(hours) ч событий со временем начала нет.",
-                     "События на весь день — праздники и дни рождения — встречами не считаются."])
+            return (tr("Ничего не запланировано", "Nothing scheduled"),
+                    [tr("В ближайшие \(hours) ч событий со временем начала нет.", "No timed events in the next \(hours) h."),
+                     tr("События на весь день — праздники и дни рождения — встречами не считаются.", "All-day events — holidays and birthdays — are not meetings.")])
         case .off:
-            return ("Календарь выключен",
-                    ["Включите «Показывать следующую встречу» в меню MacPulse.",
-                     "Пока он выключен, приложение не обращается к Календарю вообще."])
+            return (tr("Календарь выключен", "Calendar is off"),
+                    [tr("Включите «Показывать следующую встречу» в меню MacPulse.", "Turn on “Show next meeting” in the MacPulse menu."),
+                     tr("Пока он выключен, приложение не обращается к Календарю вообще.", "While it is off, the app never touches Calendar.")])
         case .requesting:
-            return ("Ждём разрешения",
-                    ["macOS спрашивает про доступ к Календарю.", ""])
+            return (tr("Ждём разрешения", "Waiting for permission"),
+                    [tr("macOS спрашивает про доступ к Календарю.", "macOS is asking for Calendar access."), ""])
         case .unavailable(let reason):
             // `unavailableHint` returns nil for the two cases that are a
             // BUILD error rather than a user problem (a missing Info.plist
             // key, a failed request). There is nothing to tell the user
             // about those, so the second line stays empty instead of
             // inventing advice they cannot act on.
-            return ("Доступ к Календарю недоступен",
+            return (tr("Доступ к Календарю недоступен", "Calendar access unavailable"),
                     [CalendarFmt.unavailableHint(.unavailable(reason)) ?? "", ""])
         }
     }
@@ -443,7 +443,7 @@ private struct CalendarSectionView: View {
 extension IslandSection {
     static let calendar = IslandSection(
         id: .calendar,
-        chipTitle: "Встреча",
+        chipTitle: tr("Встреча", "Meeting"),
         chipSymbol: "calendar",
         // Cheap and pure: one Optional read off a @Published property the
         // engine's observer already wrote. No syscall, no EventKit, no

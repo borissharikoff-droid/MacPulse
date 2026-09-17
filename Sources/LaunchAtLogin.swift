@@ -154,17 +154,21 @@ enum LaunchAtLogin {
         // naming exactly rather than reporting as a folder they have
         // never heard of.
         if bundlePath.contains("/AppTranslocation/") {
-            return "macOS открыл MacPulse из временной копии — перетащите "
-                 + "приложение в «Программы» и запустите оттуда"
+            return tr("macOS открыл MacPulse из временной копии — перетащите "
+                 + "приложение в «Программы» и запустите оттуда",
+                      "macOS opened MacPulse from a temporary copy — drag the app "
+                 + "into Applications and launch it from there")
         }
         let installed = bundlePath.hasPrefix("/Applications/")
                      || bundlePath.hasPrefix(NSHomeDirectory() + "/Applications/")
         if !installed {
-            return "перенесите MacPulse в «Программы» — для копии в «"
-                 + niceFolder(bundlePath) + "» автозапуск не регистрируется"
+            return tr("перенесите MacPulse в «Программы» — для копии в «"
+                 + niceFolder(bundlePath) + "» автозапуск не регистрируется",
+                      "move MacPulse into Applications — open at login cannot be "
+                 + "registered for a copy in " + niceFolder(bundlePath))
         }
         let ns = error as NSError
-        return "macOS отказал (\(ns.domain) \(ns.code))"
+        return tr("macOS отказал (\(ns.domain) \(ns.code))", "macOS refused (\(ns.domain) \(ns.code))")
     }
 
     private static func niceFolder(_ path: String) -> String {

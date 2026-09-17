@@ -116,18 +116,20 @@ struct PressureFold: View {
             Text("\(state.deliveredToday)/\(state.dailyCap)")
                 .font(.system(size: 9.5).monospacedDigit())
                 .foregroundStyle(Color(white: 0.42))
-                .help("Предупреждений за сутки, против дневного предела.")
+                .help(tr("Предупреждений за сутки, против дневного предела.",
+                         "Warnings today, against the daily limit."))
 
             if state.authorization == .denied {
                 // `.unavailable` deliberately gets NO button: System
                 // Settings cannot fix an unregistered bundle and sending
                 // the user there would waste their time.
-                SmallButton(title: "Настройки",
+                SmallButton(title: tr("Настройки", "Settings"),
                             tint: IslandPalette.warning,
                             onTap: { PressureAlertEngine.shared.openNotificationSettings() })
             }
 
-            SmallButton(title: state.isMuted ? "Включить" : "Выключить",
+            SmallButton(title: state.isMuted ? tr("Включить", "Turn on")
+                                            : tr("Выключить", "Turn off"),
                         tint: state.isMuted ? IslandPalette.normal : Color(white: 0.85),
                         onTap: { PressureAlertBridge.shared.setMuted(!state.isMuted) })
         }
@@ -135,7 +137,7 @@ struct PressureFold: View {
     }
 
     private var headline: String {
-        if state.isMuted { return "Предупреждения о памяти выключены" }
+        if state.isMuted { return tr("Предупреждения о памяти выключены", "Memory warnings are off") }
         // `isFinal` is `.denied` or `.unavailable` — the two states nothing
         // we do can change. Written as `isFinal` rather than compared
         // against the cases because `.unavailable` carries a reason string
@@ -187,9 +189,9 @@ private struct PressureAlertRow: View {
 
     private var deliveryLabel: String {
         switch entry.delivery {
-        case .shown:            return "показано"
-        case .silent:           return "без баннера"
-        case .blocked(let why): return "не отправлено: \(why)"
+        case .shown:            return tr("показано", "shown")
+        case .silent:           return tr("без баннера", "no banner")
+        case .blocked(let why): return tr("не отправлено: \(why)", "not sent: \(why)")
         }
     }
 

@@ -298,12 +298,12 @@ final class ClipboardFeature {
         let kind: String
         let symbol: String
         switch e.kind {
-        case .text:     kind = "текст";    symbol = "textformat"
+        case .text:     kind = tr("текст", "text");    symbol = "textformat"
         case .richText: kind = "RTF";      symbol = "doc.richtext"
-        case .url:      kind = "ссылка";   symbol = "link"
-        case .fileURLs: kind = e.fileCount.map { "файлы · \($0)" } ?? "файлы"
+        case .url:      kind = tr("ссылка", "link");   symbol = "link"
+        case .fileURLs: kind = e.fileCount.map { tr("файлы · \($0)", "files · \($0)") } ?? tr("файлы", "files")
                         symbol = "doc.on.doc"
-        case .image:    kind = "картинка"; symbol = "photo"
+        case .image:    kind = tr("картинка", "image"); symbol = "photo"
         }
 
         // An image's text preview is its pixel size, which is what the chip
@@ -536,9 +536,9 @@ private struct ShelfChip: View {
     private var help: String {
         let head = "\(item.kind) · \(item.size) · \(item.time)\n\(item.preview)"
         return item.isLive
-            ? head + "\n\nПеретащите в другое приложение. Нажмите — вернётся в буфер."
-            : head + "\n\nСодержимое не сохранялось: картинки и копии больше 128 КБ "
-                   + "остаются только описанием."
+            ? head + tr("\n\nПеретащите в другое приложение. Нажмите — вернётся в буфер.", "\n\nDrag to another app. Click to copy it back.")
+            : head + tr("\n\nСодержимое не сохранялось: картинки и копии больше 128 КБ ", "\n\nContent was not kept: images and copies over 128 KB ")
+                   + tr("остаются только описанием.", "stay as a description only.")
     }
 
     var body: some View {
@@ -584,7 +584,7 @@ private struct ShelfChip: View {
                 // IslandModel would republish the whole shelf to animate
                 // one word — the publishing rule at the top of
                 // IslandModel.swift is exactly about not doing that.
-                Text(justCopied ? "Скопировано" : item.preview)
+                Text(justCopied ? tr("Скопировано", "Copied") : item.preview)
                     .font(.system(size: 10.5, weight: justCopied ? .semibold : .regular))
                     .foregroundStyle(justCopied
                                      ? IslandPalette.normal
@@ -680,7 +680,7 @@ struct ClipboardShelf: View {
                 // THE ONE STATE THE SHELF HAS TO SAY OUT LOUD. Paused
                 // means nothing is being recorded, and a silently empty
                 // shelf would look like a broken one.
-                Text("ЗАПИСЬ НА ПАУЗЕ")
+                Text(tr("ЗАПИСЬ НА ПАУЗЕ", "RECORDING PAUSED"))
                     .font(.system(size: 9, weight: .semibold))
                     .tracking(0.6)
                     .foregroundStyle(IslandPalette.warning)
@@ -707,10 +707,10 @@ struct ClipboardShelf: View {
         // of prose about the secret filter, on a panel the user has twice
         // said has too many words.
         .contextMenu {
-            Button(state.isPaused ? "Продолжить запись" : "Остановить запись") {
+            Button(state.isPaused ? tr("Продолжить запись", "Resume recording") : tr("Остановить запись", "Stop recording")) {
                 ClipboardFeature.shared.setPaused(!state.isPaused)
             }
-            Button("Очистить историю") {
+            Button(tr("Очистить историю", "Clear history")) {
                 ClipboardFeature.shared.clearHistory()
             }
             Divider()
@@ -719,11 +719,11 @@ struct ClipboardShelf: View {
             // survives «Очистить» — clearing the history is not a reason
             // to forget that three passwords went past untouched.
             Text(state.entryCount == 0
-                 ? "История пуста"
-                 : "\(state.entryCount) \(ClipboardRu.entries(state.entryCount))"
-                   + " · показано \(min(state.entryCount, ClipboardShelfState.slots))")
+                 ? tr("История пуста", "History is empty")
+                 : plural(state.entryCount, "запись", "записи", "записей", "entry", "entries")
+                   + tr(" · показано \(min(state.entryCount, ClipboardShelfState.slots))", " · \(min(state.entryCount, ClipboardShelfState.slots)) shown"))
             if state.skippedSecrets > 0 {
-                Text("секретов пропущено: \(state.skippedSecrets)")
+                Text(tr("секретов пропущено: \(state.skippedSecrets)", "secrets skipped: \(state.skippedSecrets)"))
             }
         }
     }

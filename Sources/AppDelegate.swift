@@ -21,7 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     private var updateTimer: Timer?
     private var updateResetWork: DispatchWorkItem?
     private var isUpdating = false
-    private static let restingUpdateTitle = "Проверить обновления…"
+    private static var restingUpdateTitle: String { tr("Проверить обновления…", "Check for updates…") }
 
     /// What the status item currently DRAWS. A tick whose signature is
     /// unchanged does not rebuild the NSImage — see StatusItemIcon.
@@ -90,6 +90,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         statusItem.button?.imagePosition = .imageOnly
         statusItem.button?.toolTip = "MacPulse"
 
+        buildMenu()
+    }
+
+    /// Built once at launch and again whenever the language changes.
+    ///
+    /// Rebuilt whole rather than re-titled item by item: a menu with
+    /// eight items and three states has more titles than anyone will
+    /// remember to update, and the one that gets forgotten stays in the
+    /// old language until the app is relaunched.
+    private func buildMenu() {
         let menu = NSMenu()
         menu.delegate = self
         // AppKit's default is TRUE, which silently re-enables anything we
@@ -104,7 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         menu.addItem(headerItem)
         menu.addItem(.separator())
 
-        islandItem = NSMenuItem(title: "Скрыть островок",
+        islandItem = NSMenuItem(title: tr("Скрыть островок", "Hide island"),
                                 action: #selector(toggleIsland), keyEquivalent: "")
         islandItem.target = self
         menu.addItem(islandItem)
@@ -117,19 +127,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         // the island panel.
         // The "frees disk, not memory" caveat lives in the tooltip below —
         // in the title it was the second-longest string in the menu.
-        cleanupItem = NSMenuItem(title: "Очистить кэши и логи",
+        cleanupItem = NSMenuItem(title: tr("Очистить кэши и логи", "Clean caches and logs"),
                                  action: #selector(cleanupTapped), keyEquivalent: "")
         cleanupItem.target = self
-        cleanupItem.toolTip = """
+        cleanupItem.toolTip = tr("""
         Удаляет содержимое ~/Library/Caches и ~/Library/Logs.
         На давление памяти это не влияет — чтобы его снизить, \
         закройте приложение с большим footprint в панели островка.
-        """
+        """, """
+        Deletes the contents of ~/Library/Caches and ~/Library/Logs.
+        This does not affect memory pressure — to lower that, \
+        quit an app with a large footprint in the island panel.
+        """)
         menu.addItem(cleanupItem)
 
         menu.addItem(.separator())
 
-        loginItem = NSMenuItem(title: "Запускать при входе",
+        loginItem = NSMenuItem(title: tr("Запускать при входе", "Open at login"),
                                action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         loginItem.target = self
         renderLoginItem()
@@ -137,12 +151,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
         // THE ONLY THING IN MACPULSE THAT CAN SHOW A PERMISSION DIALOG,
         // and it only can because the user clicked this line.
-        calendarItem = NSMenuItem(title: "Показывать следующую встречу",
+        calendarItem = NSMenuItem(title: tr("Показывать следующую встречу", "Show next meeting"),
                                   action: #selector(toggleCalendar), keyEquivalent: "")
         calendarItem.target = self
         calendarItem.state = CalendarEngine.shared.isEnabledByUser ? .on : .off
-        calendarItem.toolTip = "Читает только время начала ближайшей встречи. "
-                             + "Названия встреч никуда не записываются и не отправляются."
+        calendarItem.toolTip = tr("Читает только время начала ближайшей встречи. "
+                             + "Названия встреч никуда не записываются и не отправляются.",
+                                  "Reads only the start time of the next meeting. "
+                             + "Meeting titles are never stored or sent anywhere.")
         menu.addItem(calendarItem)
 
         menu.addItem(.separator())
@@ -155,12 +171,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         updateItem = NSMenuItem(title: Self.restingUpdateTitle,
                                 action: #selector(checkForUpdatesManually), keyEquivalent: "")
         updateItem.target = self
-        updateItem.toolTip = "Загружает новую версию с GitHub и перезапускает приложение. "
-                           + "Это единственное сетевое соединение MacPulse наружу."
+        updateItem.toolTip = tr("Загружает новую версию с GitHub и перезапускает приложение. "
+                           + "Это единственное сетевое соединение MacPulse наружу.",
+                                "Downloads the new version from GitHub and restarts the app. "
+                           + "This is MacPulse's only outbound network connection.")
         menu.addItem(updateItem)
 
         menu.addItem(.separator())
-        let quitItem = NSMenuItem(title: "Выход", action: #selector(quit), keyEquivalent: "q")
+
+        // «Язык» / «Language». Its own title is in BOTH languages on
+        // purpose: somebody who has the app in a language they cannot read
+        // needs to find this item, and that is the whole population this
+        // menu entry exists for.
+        let languageItem = NSMenuItem(title: "Язык · Language", action: nil, keyEquivalent: "")
+        let languageMenu = NSMenu()
+        for option in AppLanguage.allCases {
+            let item = NSMenuItem(title: option.title,
+                                  action: #selector(pickLanguage(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = option.rawValue
+            item.state = Lang.preference == option ? .on : .off
+            languageMenu.addItem(item)
+        }
+        languageItem.submenu = languageMenu
+        menu.addItem(languageItem)
+
+        menu.addItem(.separator())
+        let quitItem = NSMenuItem(title: tr("Выход", "Quit"), action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 
@@ -199,8 +236,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     private func tooltip(_ s: MetricsSnapshot) -> String {
         let cpu = s.cpu?.overall.busy
         let ram = s.memory?.usedFraction
-        return "MacPulse — CPU \(UIFmt.pct(cpu)) · память \(UIFmt.pct(ram)) · "
-            + "давление: \(IslandPalette.label(for: s.memory?.pressureLevel))"
+        return tr("MacPulse — CPU \(UIFmt.pct(cpu)) · память \(UIFmt.pct(ram)) · "
+            + "давление: \(IslandPalette.label(for: s.memory?.pressureLevel))",
+                  "MacPulse — CPU \(UIFmt.pct(cpu)) · memory \(UIFmt.pct(ram)) · "
+            + "pressure: \(IslandPalette.label(for: s.memory?.pressureLevel))")
     }
 
     /// NSMenuItem.title collapses embedded newlines into ONE line, so the old
@@ -214,9 +253,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     private func headerAttributed(_ s: MetricsSnapshot) -> NSAttributedString {
         var lines: [String] = []
         if let m = s.memory {
-            lines.append("Давление: \(IslandPalette.label(for: m.pressureLevel))")
-            lines.append("Распаковка \(UIFmt.mbps(m.rates?.decompressionBytesPerSec))"
-                         + "   Своп \(UIFmt.bytes(m.swapUsedBytes))")
+            lines.append(tr("Давление: \(IslandPalette.label(for: m.pressureLevel))",
+                            "Pressure: \(IslandPalette.label(for: m.pressureLevel))"))
+            lines.append(tr("Распаковка \(UIFmt.mbps(m.rates?.decompressionBytesPerSec))"
+                         + "   Своп \(UIFmt.bytes(m.swapUsedBytes))",
+                            "Decompression \(UIFmt.mbps(m.rates?.decompressionBytesPerSec))"
+                         + "   Swap \(UIFmt.bytes(m.swapUsedBytes))"))
         }
         if let top = s.processes?.apps.first {
             lines.append("\(top.name) — \(UIFmt.bytes(top.footprintBytes))")
@@ -270,7 +312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         // tells us when the user flips this in System Settings.
         renderLoginItem()
 
-        islandItem.title = island.isVisible ? "Скрыть островок" : "Показать островок"
+        islandItem.title = island.isVisible ? tr("Скрыть островок", "Hide island") : tr("Показать островок", "Show island")
     }
 
     func menuDidClose(_ menu: NSMenu) {
@@ -347,7 +389,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
                     NSLog("MacPulse: update check failed: \(why)")
                     self.isUpdating = false
                     if !silent {
-                        self.updateItem.title = "Не удалось проверить обновления"
+                        self.updateItem.title = tr("Не удалось проверить обновления", "Update check failed")
                         self.resetUpdateItemLater()
                     } else {
                         self.updateItem.title = Self.restingUpdateTitle
@@ -357,7 +399,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
                     NSLog("MacPulse: up to date (v\(version))")
                     self.isUpdating = false
                     if !silent {
-                        self.updateItem.title = "Обновлений нет (v\(version))"
+                        self.updateItem.title = tr("Обновлений нет (v\(version))", "Up to date (v\(version))")
                         self.resetUpdateItemLater()
                     } else {
                         self.updateItem.title = Self.restingUpdateTitle
@@ -365,7 +407,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
                 case .available(let release):
                     NSLog("MacPulse: v\(release.version) available, downloading")
-                    self.updateItem.title = "Скачиваю v\(release.version)… 0%"
+                    self.updateItem.title = tr("Скачиваю v\(release.version)… 0%", "Downloading v\(release.version)… 0%")
                     self.install(release)
                 }
             }
@@ -377,9 +419,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             // Already on the main thread — Updater dispatches it there.
             guard let self else { return }
             if fraction >= 1 {
-                self.updateItem.title = "Проверяю и устанавливаю v\(release.version)…"
+                self.updateItem.title = tr("Проверяю и устанавливаю v\(release.version)…", "Verifying and installing v\(release.version)…")
             } else {
-                self.updateItem.title = "Скачиваю v\(release.version)… \(Int(fraction * 100))%"
+                self.updateItem.title = tr("Скачиваю v\(release.version)… \(Int(fraction * 100))%", "Downloading v\(release.version)… \(Int(fraction * 100))%")
             }
         } completion: { [weak self] result in
             DispatchQueue.main.async {
@@ -390,14 +432,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
                     // this title is mostly there for the instant before
                     // the app goes away.
                     NSLog("MacPulse: installed v\(version), relaunching")
-                    self.updateItem.title = "Установлено v\(version) — перезапуск…"
+                    self.updateItem.title = tr("Установлено v\(version) — перезапуск…", "Installed v\(version) — restarting…")
                 case .failure(let why):
                     // EVERY one of these leaves the installed app exactly
                     // as it was. Nothing is swapped in that did not pass
                     // all six checks in Updater.validate.
                     NSLog("MacPulse: update refused — \(why)")
                     self.isUpdating = false
-                    self.updateItem.title = "Обновление не установлено"
+                    self.updateItem.title = tr("Обновление не установлено", "Update not installed")
                     self.resetUpdateItemLater()
                 }
             }
@@ -422,15 +464,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
     @objc private func toggleIsland() {
         island.setVisible(!island.isVisible)
-        islandItem.title = island.isVisible ? "Скрыть островок" : "Показать островок"
+        islandItem.title = island.isVisible ? tr("Скрыть островок", "Hide island") : tr("Показать островок", "Show island")
     }
 
     @objc private func cleanupTapped() {
         guard !isCleaning else { return }
         isCleaning = true
         cleanupItem.isEnabled = false
-        let restingTitle = "Очистить кэши и логи"
-        cleanupItem.title = "Очищаю…"
+        let restingTitle = tr("Очистить кэши и логи", "Clean caches and logs")
+        cleanupItem.title = tr("Очищаю…", "Cleaning…")
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = Maintenance.cleanCachesAndLogs()
@@ -458,19 +500,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         switch state {
         case .on:
             loginItem.state = .on
-            loginItem.toolTip = "MacPulse появится в островке сразу после входа в систему."
+            loginItem.toolTip = tr("MacPulse появится в островке сразу после входа в систему.",
+                                   "MacPulse will appear in the island right after you log in.")
             loginFailure = nil
         case .off:
             loginItem.state = .off
             loginItem.toolTip = loginFailure
-                ?? "Сейчас выключено — MacPulse нужно запускать вручную."
+                ?? tr("Сейчас выключено — MacPulse нужно запускать вручную.",
+                      "Currently off — MacPulse has to be launched manually.")
         case .needsApproval:
             // NOT a checkmark. In this state the app does not start at
             // login, and a checkmark would say that it does. The dash is
             // the native way to say «ни то ни другое».
             loginItem.state = .mixed
-            loginItem.toolTip = "Зарегистрировано, но выключено в «Объектах входа». "
-                              + "Нажмите, чтобы открыть этот раздел настроек."
+            loginItem.toolTip = tr("Зарегистрировано, но выключено в «Объектах входа». "
+                              + "Нажмите, чтобы открыть этот раздел настроек.",
+                                   "Registered, but switched off in Login Items. "
+                              + "Click to open that settings pane.")
         case .unavailable(let why):
             loginItem.state = .off
             loginItem.toolTip = why
@@ -505,9 +551,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     private func reportLoginFailure(_ why: String) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Автозапуск не включился"
+        alert.messageText = tr("Автозапуск не включился", "Open at login was not enabled")
         alert.informativeText = why
-        alert.addButton(withTitle: "Понятно")
+        alert.addButton(withTitle: tr("Понятно", "OK"))
         // Accessory apps have no windows to come forward; without this the
         // alert opens behind whatever the user is looking at.
         NSApp.activate(ignoringOtherApps: true)
@@ -532,8 +578,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
     @objc private func checkForUpdatesManually() {
         guard !isUpdating else { return }
-        updateItem.title = "Проверяю…"
+        updateItem.title = tr("Проверяю…", "Checking…")
         checkForUpdates(silent: false)
+    }
+
+    @objc private func pickLanguage(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let choice = AppLanguage(rawValue: raw) else { return }
+        let before = Lang.resolved
+        Lang.set(choice)
+        // The menu is rebuilt for the checkmark even when the resolved
+        // language did not move — picking «Как в системе» on a Russian Mac
+        // that was already Russian still changes which item is ticked.
+        buildMenu()
+        if Lang.resolved != before { island.rebuildForLanguageChange() }
     }
 
     @objc private func quit() {

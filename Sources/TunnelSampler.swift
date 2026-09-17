@@ -143,7 +143,7 @@ enum TunnelTool: String, CaseIterable, Sendable {
     var launchCaution: String? {
         switch self {
         case .amnezia:
-            return "Может подключиться сам при запуске (сохранён сервер, routeMode 1). Не проверено."
+            return tr("Может подключиться сам при запуске (сохранён сервер, routeMode 1). Не проверено.", "May connect by itself at launch (server saved, routeMode 1). Unverified.")
         case .flClash, .warp, .tailscale:
             return nil
         }
@@ -813,9 +813,9 @@ final class TunnelSampler {
         for tool in TunnelTool.allCases {
             let install = installed[tool]
             guard let bundleURL = install?.bundleURL else {
-                var reason = "Нет приложения в базе LaunchServices."
+                var reason = tr("Нет приложения в базе LaunchServices.", "No app in the LaunchServices database.")
                 if let ghost = ghostSignatures[tool] {
-                    reason += " (\(ghost) попадает в его документированный диапазон, но приложения нет — не засчитано.)"
+                    reason += tr(" (\(ghost) попадает в его документированный диапазон, но приложения нет — не засчитано.)", " (\(ghost) falls inside its documented range, but the app is absent — not counted.)")
                 }
                 tools.append(TunnelToolStatus(tool: tool, state: .notInstalled, bundleURL: nil,
                                               attributedInterface: nil,
@@ -837,24 +837,24 @@ final class TunnelSampler {
                 if let interface {
                     if interface == carrier.interface {
                         state = .carryingTraffic
-                        let gateway = carrier.gateway.map { " через \($0)" } ?? ""
-                        reason = "\(interface) владеет маршрутом к \(probeDestinations.first ?? "интернету")\(gateway)."
+                        let gateway = carrier.gateway.map { tr(" через \($0)", " via \($0)") } ?? ""
+                        reason = tr("\(interface) владеет маршрутом к \(probeDestinations.first ?? "интернету")\(gateway).", "\(interface) owns the route to \(probeDestinations.first ?? "the internet")\(gateway).")
                     } else {
                         state = .upNotCarrying
-                        reason = "\(interface) поднят, но маршрутом к интернету владеет \(carrier.interface)."
+                        reason = tr("\(interface) поднят, но маршрутом к интернету владеет \(carrier.interface).", "\(interface) is up, but \(carrier.interface) owns the route to the internet.")
                     }
                 } else if carrierIsUnnamedTunnel {
                     state = .cannotDetermine
                     let address = carrier.ipv4.map { " (\($0))" } ?? ""
-                    reason = "Трафик уходит через \(carrier.interface)\(address) — адрес не совпадает ни с одной надёжной сигнатурой. Это может быть он."
+                    reason = tr("Трафик уходит через \(carrier.interface)\(address) — адрес не совпадает ни с одной надёжной сигнатурой. Это может быть он.", "Traffic leaves via \(carrier.interface)\(address) — the address matches no trusted signature. This could be it.")
                 } else {
                     state = .installedIdle
-                    reason = "Трафик уходит через \(carrier.interface); ни один интерфейс не приписан этому инструменту."
+                    reason = tr("Трафик уходит через \(carrier.interface); ни один интерфейс не приписан этому инструменту.", "Traffic leaves via \(carrier.interface); no interface is attributed to this tool.")
                 }
             } else {
                 state = .cannotDetermine
-                let seen = interface.map { " \($0) поднят, но это не доказательство трафика." } ?? ""
-                reason = "Запрос к таблице маршрутов ничего не вернул; утверждать что-либо о трафике нельзя.\(seen)"
+                let seen = interface.map { tr(" \($0) поднят, но это не доказательство трафика.", " \($0) is up, but that is not proof of traffic.") } ?? ""
+                reason = tr("Запрос к таблице маршрутов ничего не вернул; утверждать что-либо о трафике нельзя.\(seen)", "The routing-table query returned nothing; nothing can be claimed about traffic.\(seen)")
             }
 
             tools.append(TunnelToolStatus(tool: tool, state: state, bundleURL: bundleURL,

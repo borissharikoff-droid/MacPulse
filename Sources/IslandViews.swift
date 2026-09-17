@@ -75,9 +75,9 @@ enum IslandPalette {
 
     static func label(for level: MemoryPressureLevel?) -> String {
         switch level {
-        case .normal: return "Норма"
-        case .warning: return "Предупреждение"
-        case .critical: return "Критично"
+        case .normal: return tr("Норма", "Normal")
+        case .warning: return tr("Предупреждение", "Warning")
+        case .critical: return tr("Критично", "Critical")
         case nil: return "—"
         }
     }
@@ -97,7 +97,7 @@ enum UIFmt {
 
     static func bytes(_ v: Double?, _ digits: Int = 1) -> String {
         guard let v else { return "—" }
-        let units = ["Б", "КБ", "МБ", "ГБ", "ТБ"]
+        let units = [tr("Б", "B"), tr("КБ", "KB"), tr("МБ", "MB"), tr("ГБ", "GB"), tr("ТБ", "TB")]
         var x = abs(v), i = 0
         while x >= 1024, i < units.count - 1 { x /= 1024; i += 1 }
         return String(format: "%.\(i <= 1 ? 0 : digits)f %@", v < 0 ? -x : x, units[i])
@@ -105,7 +105,7 @@ enum UIFmt {
 
     static func rate(_ v: Double?) -> String {
         guard let v else { return "—" }
-        return bytes(v, 1) + "/с"
+        return bytes(v, 1) + tr("/с", "/s")
     }
 
     /// Compressor traffic is always talked about in MB/s in the research,
@@ -113,7 +113,7 @@ enum UIFmt {
     /// between "900 КБ/с" and "1.2 ГБ/с" is unreadable as a trend.
     static func mbps(_ v: Double?) -> String {
         guard let v else { return "—" }
-        return String(format: "%.0f МБ/с", v / 1_048_576)
+        return String(format: tr("%.0f МБ/с", "%.0f MB/s"), v / 1_048_576)
     }
 
     static func pct(_ v: Double?, _ digits: Int = 0) -> String {
@@ -123,7 +123,7 @@ enum UIFmt {
 
     static func watts(_ v: Double?) -> String {
         guard let v else { return "—" }
-        return String(format: "%.2f Вт", v)
+        return String(format: tr("%.2f Вт", "%.2f W"), v)
     }
 
     /// Unit-less twin for side-by-side pairs, so "7.37/0.28 Вт" fits where
@@ -140,12 +140,12 @@ enum UIFmt {
 
     static func perSec(_ v: Double?) -> String {
         guard let v else { return "—" }
-        return String(format: "%.0f/с", v)
+        return String(format: tr("%.0f/с", "%.0f/s"), v)
     }
 
     static func pages(_ v: Double?) -> String {
         guard let v else { return "—" }
-        return String(format: "%.0f стр/с", v)
+        return String(format: tr("%.0f стр/с", "%.0f pg/s"), v)
     }
 
     static func count(_ v: Double?) -> String {
@@ -158,12 +158,12 @@ enum UIFmt {
     /// "940 Б/с / 940 Б/с", which does not fit a mini stat and truncates.
     static func pairRate(_ a: Double?, _ b: Double?) -> String {
         guard let a, let b else { return "—" }
-        let units = ["Б", "КБ", "МБ", "ГБ"]
+        let units = [tr("Б", "B"), tr("КБ", "KB"), tr("МБ", "MB"), tr("ГБ", "GB")]
         var i = 0
         var scale = 1.0
         while max(a, b) / scale >= 1024, i < units.count - 1 { scale *= 1024; i += 1 }
         let digits = i == 0 ? 0 : 1
-        return String(format: "%.\(digits)f/%.\(digits)f %@/с", a / scale, b / scale, units[i])
+        return String(format: tr("%.\(digits)f/%.\(digits)f %@/с", "%.\(digits)f/%.\(digits)f %@/s"), a / scale, b / scale, units[i])
     }
 }
 

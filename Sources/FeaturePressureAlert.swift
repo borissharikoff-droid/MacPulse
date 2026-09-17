@@ -504,12 +504,16 @@ enum PressureAlertAuthorization: Equatable {
     /// One short line for the panel.
     var panelLine: String {
         switch self {
-        case .notRequested:       return "Разрешение спросим, когда будет о чём предупредить"
-        case .requesting:         return "Запрашиваем разрешение…"
-        case .authorized:         return "Уведомления включены"
-        case .authorizedSilently: return "Уведомления без баннера — только в Центре уведомлений"
-        case .denied:             return "Уведомления запрещены — включите в Настройках"
-        case .unavailable:        return "Уведомления недоступны для этой сборки"
+        case .notRequested:       return tr("Разрешение спросим, когда будет о чём предупредить",
+                                            "We'll ask when there's something to warn about")
+        case .requesting:         return tr("Запрашиваем разрешение…", "Requesting permission…")
+        case .authorized:         return tr("Уведомления включены", "Notifications on")
+        case .authorizedSilently: return tr("Уведомления без баннера — только в Центре уведомлений",
+                                            "No banners — Notification Centre only")
+        case .denied:             return tr("Уведомления запрещены — включите в Настройках",
+                                            "Notifications denied — enable in Settings")
+        case .unavailable:        return tr("Уведомления недоступны для этой сборки",
+                                            "Notifications unavailable in this build")
         }
     }
 }
@@ -860,7 +864,8 @@ final class PressureAlertEngine: NSObject, UNUserNotificationCenterDelegate {
         // confirm the fire, so the cooldown is untouched and the next tick
         // with a readable process list alerts.
         guard let culprit = Self.culprit(in: snapshot) else {
-            emit(.couldNotDeliver(reason: "нет приложения, которое можно назвать и завершить",
+            emit(.couldNotDeliver(reason: tr("нет приложения, которое можно назвать и завершить",
+                                             "no app to name and quit"),
                                   trigger: trigger))
             return
         }
@@ -894,7 +899,9 @@ final class PressureAlertEngine: NSObject, UNUserNotificationCenterDelegate {
                 // and we never ask again.
                 if settings.authorizationStatus == .notDetermined {
                     self.requestOnce()
-                    self.emit(.couldNotDeliver(reason: "спрашиваем разрешение", trigger: trigger))
+                    self.emit(.couldNotDeliver(reason: tr("спрашиваем разрешение",
+                                                          "asking for permission"),
+                                               trigger: trigger))
                     return
                 }
                 guard self.authorization.canPost else {
@@ -971,12 +978,13 @@ final class PressureAlertEngine: NSObject, UNUserNotificationCenterDelegate {
         // `didReceive` on the main thread without it. Making the island
         // jump to the front to answer a button press the user made
         // somewhere else is not worth it.
-        let quitTitle = culpritName.map { "Завершить \($0)" } ?? "Завершить приложение"
+        let quitTitle = culpritName.map { tr("Завершить \($0)", "Quit \($0)") }
+            ?? tr("Завершить приложение", "Quit app")
         let quit = UNNotificationAction(identifier: Self.quitActionIdentifier,
                                         title: quitTitle,
                                         options: [.destructive])
         let snooze = UNNotificationAction(identifier: Self.snoozeActionIdentifier,
-                                          title: "Не сейчас",
+                                          title: tr("Не сейчас", "Not now"),
                                           options: [])
         let category = UNNotificationCategory(identifier: Self.categoryIdentifier,
                                               actions: [quit, snooze],
@@ -1251,8 +1259,8 @@ enum PressureAlertCopy {
 
     static func title(_ trigger: PressureAlertTrigger) -> String {
         switch trigger.severity {
-        case .critical: return "Памяти почти нет"
-        case .warning:  return "Память под давлением"
+        case .critical: return tr("Памяти почти нет", "Almost out of memory")
+        case .warning:  return tr("Память под давлением", "Memory pressure")
         }
     }
 
@@ -1263,15 +1271,17 @@ enum PressureAlertCopy {
         var parts: [String] = []
 
         // 1. The actionable fact, always first — this is the whole point.
-        parts.append("Больше всех — \(culprit.name): \(UIFmt.bytes(culprit.footprintBytes)).")
+        parts.append(tr("Больше всех — \(culprit.name): \(UIFmt.bytes(culprit.footprintBytes)).",
+                        "Biggest: \(culprit.name) — \(UIFmt.bytes(culprit.footprintBytes))."))
 
         // 2. ONE corroborating measurement, if we have one. A body longer
         //    than about two lines is truncated in the banner, so this is a
         //    single clause and it is only added when the number is real.
         if let churn = memory?.rates?.compressorChurnBytesPerSec, churn >= 20 * 1024 * 1024 {
-            parts.append("Компрессор: \(UIFmt.mbps(churn)).")
+            parts.append(tr("Компрессор: \(UIFmt.mbps(churn)).",
+                            "Compressor: \(UIFmt.mbps(churn))."))
         } else if let swap = memory?.swapUsedBytes, swap > 0 {
-            parts.append("Своп: \(UIFmt.bytes(swap)).")
+            parts.append(tr("Своп: \(UIFmt.bytes(swap)).", "Swap: \(UIFmt.bytes(swap))."))
         }
 
         // 3. The truthful jetsam clause.
@@ -1290,15 +1300,17 @@ enum PressureAlertCopy {
             return ""
         case .dormant(let window):
             guard let minutes = minutes(window) else {
-                return "macOS пока ничего не завершал."
+                return tr("macOS пока ничего не завершал.", "macOS hasn't quit anything yet.")
             }
-            return "За \(minutes) мин macOS ничего не завершал."
+            return tr("За \(minutes) мин macOS ничего не завершал.",
+                      "macOS hasn't quit anything in \(minutes) min.")
         case .hasKilled(let count, let window):
-            let noun = pluralApps(count)
+            let apps = pluralApps(count)
             guard let minutes = minutes(window) else {
-                return "macOS уже завершил \(count) \(noun)."
+                return tr("macOS уже завершил \(apps).", "macOS has already quit \(apps).")
             }
-            return "macOS уже завершил \(count) \(noun) за \(minutes) мин."
+            return tr("macOS уже завершил \(apps) за \(minutes) мин.",
+                      "macOS has already quit \(apps) in \(minutes) min.")
         }
     }
 
@@ -1306,18 +1318,22 @@ enum PressureAlertCopy {
     static func killerPanelLine(_ killer: SustainedPressureKiller) -> String {
         switch killer.verdict {
         case .unknown:
-            return "Счётчик принудительных завершений macOS недоступен"
+            return tr("Счётчик принудительных завершений macOS недоступен",
+                      "macOS force-quit counter unavailable")
         case .dormant(let window):
             guard let minutes = minutes(window) else {
-                return "macOS ничего не завершал из-за памяти"
+                return tr("macOS ничего не завершал из-за памяти",
+                          "macOS hasn't quit anything over memory")
             }
-            return "macOS ничего не завершал из-за памяти за последние \(minutes) мин"
+            return tr("macOS ничего не завершал из-за памяти за последние \(minutes) мин",
+                      "macOS hasn't quit anything over memory in the last \(minutes) min")
         case .hasKilled(let count, let window):
-            let noun = pluralApps(count)
+            let apps = pluralApps(count)
             guard let minutes = minutes(window) else {
-                return "macOS завершил \(count) \(noun) из-за памяти"
+                return tr("macOS завершил \(apps) из-за памяти", "macOS quit \(apps) over memory")
             }
-            return "macOS завершил \(count) \(noun) из-за памяти за \(minutes) мин"
+            return tr("macOS завершил \(apps) из-за памяти за \(minutes) мин",
+                      "macOS quit \(apps) over memory in \(minutes) min")
         }
     }
 
@@ -1329,14 +1345,7 @@ enum PressureAlertCopy {
     /// 1 приложение / 2–4 приложения / 5+ приложений, with the Slavic
     /// teens exception.
     static func pluralApps(_ n: UInt64) -> String {
-        let last2 = n % 100
-        let last = n % 10
-        if last2 >= 11 && last2 <= 14 { return "приложений" }
-        switch last {
-        case 1: return "приложение"
-        case 2, 3, 4: return "приложения"
-        default: return "приложений"
-        }
+        plural(Int(n), "приложение", "приложения", "приложений", "app", "apps")
     }
 
     /// Why the user is not being bothered, in one clause. Built ONLY while
@@ -1344,38 +1353,49 @@ enum PressureAlertCopy {
     /// publishing it with the panel shut is exactly the churn IslandModel's
     /// header warns about.
     static func suppressionLine(_ reason: PressureAlertSuppression?) -> String {
-        guard let reason else { return "Следим за давлением памяти" }
+        guard let reason else { return tr("Следим за давлением памяти", "Watching memory pressure") }
         switch reason {
         case .unmeasured:
-            return "Уровень давления не читается — ждём измерения"
+            return tr("Уровень давления не читается — ждём измерения",
+                      "Pressure level unreadable — waiting")
         case .measurementGap:
-            return "Пропуск в измерениях — отсчёт начат заново"
+            return tr("Пропуск в измерениях — отсчёт начат заново",
+                      "Gap in measurements — timer restarted")
         case .normal:
-            return "Давление в норме"
+            return tr("Давление в норме", "Pressure is normal")
         case .rearming(let remaining):
-            return "Норма \(secs(remaining)) до готовности предупредить снова"
+            return tr("Норма \(secs(remaining)) до готовности предупредить снова",
+                      "Warnings resume after \(secs(remaining)) of normal")
         case .episodeSettling(let normalFor):
-            return "Давление спало \(secs(normalFor)) назад — эпизод ещё считается открытым"
+            return tr("Давление спало \(secs(normalFor)) назад — эпизод ещё считается открытым",
+                      "Pressure dropped \(secs(normalFor)) ago — episode still open")
         case .startupGrace(let remaining):
-            return "Первая минута после запуска — молчим ещё \(secs(remaining))"
+            return tr("Первая минута после запуска — молчим ещё \(secs(remaining))",
+                      "First minute after launch — quiet for \(secs(remaining))")
         case .dwellTooShort(let elapsed, let needed):
-            return "Давление держится \(Int(elapsed)) с из \(Int(needed)) — порог не пройден"
+            return tr("Давление держится \(Int(elapsed)) с из \(Int(needed)) — порог не пройден",
+                      "Pressure held \(Int(elapsed))s of \(Int(needed))s — below threshold")
         case .alreadyAlertedThisEpisode:
-            return "Об этом эпизоде уже предупредили"
+            return tr("Об этом эпизоде уже предупредили", "Already warned about this episode")
         case .notRearmed:
-            return "Ждём, пока давление вернётся к норме на 2 мин"
+            return tr("Ждём, пока давление вернётся к норме на 2 мин",
+                      "Waiting for 2 min of normal pressure")
         case .cooldown(let remaining):
-            return "Пауза после предупреждения — ещё \(secs(remaining))"
+            return tr("Пауза после предупреждения — ещё \(secs(remaining))",
+                      "Cooldown after a warning — \(secs(remaining)) left")
         case .snoozed(let remaining):
-            return "Отложено вами — ещё \(secs(remaining))"
+            return tr("Отложено вами — ещё \(secs(remaining))",
+                      "Snoozed by you — \(secs(remaining)) left")
         case .dailyCapReached(let cap):
-            return "Достигнут предел \(cap) предупреждения в сутки"
+            let limit = plural(cap, "предупреждение", "предупреждения", "предупреждений",
+                               "warning", "warnings")
+            return tr("Достигнут предел \(limit) в сутки", "Daily limit of \(limit) reached")
         }
     }
 
     private static func secs(_ v: TimeInterval) -> String {
         let s = Int(max(v, 0).rounded())
-        return s >= 60 ? "\(s / 60) мин" : "\(s) с"
+        return s >= 60 ? tr("\(s / 60) мин", "\(s / 60) min") : tr("\(s) с", "\(s) s")
     }
 }
 
@@ -1487,7 +1507,7 @@ final class PressureAlertBridge {
     }
 
     private func liveLine() -> String {
-        if state.isMuted { return "Предупреждения выключены" }
+        if state.isMuted { return tr("Предупреждения выключены", "Warnings off") }
         if PressureAlertEngine.shared.authorization.isFinal {
             return PressureAlertEngine.shared.authorization.panelLine
         }

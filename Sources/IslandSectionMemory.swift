@@ -72,7 +72,7 @@ private struct MemoryHero: View {
             .frame(height: 5)
 
             HStack(spacing: 6) {
-                Text("Давление памяти (ядро)")
+                Text(tr("Давление памяти (ядро)", "Memory pressure (kernel)"))
                     .font(.system(size: 9))
                     .foregroundStyle(Color(white: 0.5))
                 Spacer(minLength: 12)
@@ -131,7 +131,7 @@ private struct AppRow: View {
                 }
                 .buttonStyle(.plain)
                 .onHover { badgeHovering = $0 }
-                .help("процессов: \(row.groupCount) — это не окна. Нажмите, чтобы увидеть окна")
+                .help(tr("процессов: \(row.groupCount) — это не окна. Нажмите, чтобы увидеть окна", "\(row.groupCount) processes — not windows. Click to see windows"))
             } else if row.isApplication && hovering {
                 // ONE PROCESS, AND POSSIBLY TWENTY WINDOWS. Finder, Preview
                 // and TextEdit are single-process apps, so they never grow
@@ -153,7 +153,7 @@ private struct AppRow: View {
                 }
                 .buttonStyle(.plain)
                 .onHover { badgeHovering = $0 }
-                .help("окна приложения")
+                .help(tr("окна приложения", "App windows"))
             }
 
             Spacer(minLength: 6)
@@ -184,31 +184,31 @@ private struct AppRow: View {
         switch phase {
         case .idle:
             if row.isApplication {
-                SmallButton(title: "Завершить", tint: Color(white: 0.85), onTap: onQuit)
+                SmallButton(title: tr("Завершить", "Quit"), tint: Color(white: 0.85), onTap: onQuit)
             } else {
                 // Not an NSRunningApplication: a daemon or helper we have no
                 // safe, graceful way to stop. We show the footprint and stop
                 // there — MacPulse never kills anything the user did not
                 // individually click, and there is nothing to click here.
-                Text("фоновый процесс")
+                Text(tr("фоновый процесс", "background process"))
                     .font(.system(size: 9))
                     .foregroundStyle(Color(white: 0.38))
             }
         case .asked:
-            Text("закрывается…")
+            Text(tr("закрывается…", "quitting…"))
                 .font(.system(size: 9.5))
                 .foregroundStyle(Color(white: 0.55))
         case .needsForce:
             // SECOND, EXPLICIT step, offered only because the graceful
             // quit demonstrably did not take. Never automatic.
-            SmallButton(title: "Принудительно", tint: IslandPalette.critical, onTap: onForce)
-                .help("Приложение не закрылось само — возможно, есть несохранённые изменения. Принудительное завершение их потеряет.")
+            SmallButton(title: tr("Принудительно", "Force quit"), tint: IslandPalette.critical, onTap: onForce)
+                .help(tr("Приложение не закрылось само — возможно, есть несохранённые изменения. Принудительное завершение их потеряет.", "The app did not quit on its own — it may have unsaved changes. Force quitting will lose them."))
         case .forced:
-            Text("завершается…")
+            Text(tr("завершается…", "force quitting…"))
                 .font(.system(size: 9.5))
                 .foregroundStyle(IslandPalette.critical.opacity(0.8))
         case .gone:
-            Text("закрыто ✓")
+            Text(tr("закрыто ✓", "closed ✓"))
                 .font(.system(size: 9.5))
                 .foregroundStyle(IslandPalette.normal)
         case .failed(let why):
@@ -350,13 +350,13 @@ extension IslandSection {
     /// and this is why.
     static let memory = IslandSection(
         id: .memory,
-        chipTitle: "Память",
+        chipTitle: tr("Память", "Memory"),
         chipSymbol: "memorychip",
         // Always. A memory monitor with no memory section is not a thing.
         hasState: { _ in true },
         footerSummary: { model in
             guard let level = model.memorySection.pressure else { return nil }
-            return "Память: " + IslandPalette.label(for: level).lowercased()
+            return tr("Память: ", "Memory: ") + IslandPalette.label(for: level).lowercased()
         },
         makeBody: { model in AnyView(MemorySectionView(model: model)) }
     )

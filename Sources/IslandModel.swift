@@ -789,14 +789,14 @@ final class IslandModel: ObservableObject {
         // uid, so this is never "all processes". top sees everything only
         // because it is setuid root.
         let coverage = snap.processes.map {
-            "видно \($0.introspectedCount) из \($0.pidCount) процессов (только ваш пользователь)"
+            tr("видно \($0.introspectedCount) из \($0.pidCount) процессов (только ваш пользователь)", "\($0.introspectedCount) of \($0.pidCount) processes visible (your user only)")
         } ?? ""
 
         let next = MemorySectionState(
             pressure: m?.pressureLevel,
             barFraction: bar,
-            usedLine: "\(UIFmt.bytes(m?.usedBytes)) из \(UIFmt.bytes(m?.totalBytes)) занято",
-            swapLine: "Своп \(UIFmt.bytes(m?.swapUsedBytes)) из \(UIFmt.bytes(m?.swapTotalBytes))",
+            usedLine: tr("\(UIFmt.bytes(m?.usedBytes)) из \(UIFmt.bytes(m?.totalBytes)) занято", "\(UIFmt.bytes(m?.usedBytes)) of \(UIFmt.bytes(m?.totalBytes)) used"),
+            swapLine: tr("Своп \(UIFmt.bytes(m?.swapUsedBytes)) из \(UIFmt.bytes(m?.swapTotalBytes))", "Swap \(UIFmt.bytes(m?.swapUsedBytes)) of \(UIFmt.bytes(m?.swapTotalBytes))"),
             coverageLine: coverage,
             rows: rows
         )
@@ -829,7 +829,7 @@ final class IslandModel: ObservableObject {
         precondition(Thread.isMainThread)
         guard quitPhase(for: pid) == .idle else { return }
         guard let running = NSRunningApplication(processIdentifier: pid), !running.isTerminated else {
-            quitPhases[pid] = .failed("не приложение")
+            quitPhases[pid] = .failed(tr("не приложение", "not an app"))
             return
         }
         quitPhases[pid] = .asked
@@ -863,7 +863,7 @@ final class IslandModel: ObservableObject {
             if NSRunningApplication(processIdentifier: pid)?.isTerminated ?? true {
                 self.quitPhases[pid] = .gone
             } else {
-                self.quitPhases[pid] = .failed("не отвечает")
+                self.quitPhases[pid] = .failed(tr("не отвечает", "not responding"))
             }
         }
     }

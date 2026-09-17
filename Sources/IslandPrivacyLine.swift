@@ -59,11 +59,11 @@ enum PrivacyFooter {
         var parts: [String] = []
         if state.micActive {
             parts.append(state.micApps.isEmpty
-                ? "Микрофон занят"
-                : "Микрофон: " + state.micApps.joined(separator: ", "))
+                ? tr("Микрофон занят", "Microphone in use")
+                : tr("Микрофон: ", "Microphone: ") + state.micApps.joined(separator: ", "))
         }
         if state.cameraActive {
-            parts.append("Камера включена")
+            parts.append(tr("Камера включена", "Camera on"))
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }

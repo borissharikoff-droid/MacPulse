@@ -76,11 +76,11 @@ struct PrintStripSlot: View {
 
     static func tooltip(_ r: PrinterReading) -> String {
         var parts: [String] = []
-        parts.append(r.job ?? "Печать")
+        parts.append(r.job ?? tr("Печать", "Print"))
         if let p = r.percent { parts.append("\(p)%") }
-        if let l = r.layer, let t = r.layersTotal, t > 0 { parts.append("слой \(l)/\(t)") }
-        if r.remainMin != nil { parts.append("осталось " + PrinterFeature.remaining(r.remainMin)) }
-        if !r.errorCodes.isEmpty { parts.append("ошибка " + r.errorCodes.joined(separator: ", ")) }
+        if let l = r.layer, let t = r.layersTotal, t > 0 { parts.append(tr("слой \(l)/\(t)", "layer \(l)/\(t)")) }
+        if r.remainMin != nil { parts.append(tr("осталось ", "remaining ") + PrinterFeature.remaining(r.remainMin)) }
+        if !r.errorCodes.isEmpty { parts.append(tr("ошибка ", "error ") + r.errorCodes.joined(separator: ", ")) }
         return parts.joined(separator: " · ")
     }
 }
@@ -122,7 +122,7 @@ private struct PrinterSectionView: View {
             } else {
                 // Only reachable for the frame or two between a print
                 // ending and the router dropping the chip.
-                Text("Печать завершена")
+                Text(tr("Печать завершена", "Print finished"))
                     .font(.system(size: 11))
                     .foregroundStyle(Color(white: 0.45))
             }
@@ -145,13 +145,13 @@ private struct PrinterSectionView: View {
     @ViewBuilder private func content(_ r: PrinterReading) -> some View {
         // --- header: job name + stage ---
         HStack(spacing: 8) {
-            Text(r.job ?? "Без названия")
+            Text(r.job ?? tr("Без названия", "Untitled"))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 8)
-            Text((r.stageRu ?? r.stage ?? "—").uppercased())
+            Text(PrinterFeature.stageLabel(r).uppercased())
                 .font(.system(size: 9, weight: .semibold))
                 .tracking(0.5)
                 .foregroundStyle(tint)
@@ -183,7 +183,7 @@ private struct PrinterSectionView: View {
             VStack(alignment: .leading, spacing: 0) {
                 // --- layers ---
                 HStack(spacing: 6) {
-                    Text("Слой")
+                    Text(tr("Слой", "Layer"))
                         .font(.system(size: 10))
                         .foregroundStyle(Color(white: 0.5))
                     Text(layerLine(r))
@@ -197,7 +197,7 @@ private struct PrinterSectionView: View {
                                 .fill(IslandPalette.hex(color, fallback: IslandPalette.unknown))
                                 .frame(width: 9, height: 9)
                                 .overlay(Circle().stroke(Color(white: 0.3), lineWidth: 0.5))
-                            Text("катушка")
+                            Text(tr("катушка", "spool"))
                                 .font(.system(size: 9))
                                 .foregroundStyle(Color(white: 0.42))
                         }
@@ -229,7 +229,7 @@ private struct PrinterSectionView: View {
                         .font(.system(size: 20, weight: .semibold).monospacedDigit())
                         .foregroundStyle(.white)
                     if let eta = PrinterFeature.eta(r.remainMin) {
-                        Text("готово ≈ \(eta)")
+                        Text(tr("готово ≈ \(eta)", "done ≈ \(eta)"))
                             .font(.system(size: 10.5).monospacedDigit())
                             .foregroundStyle(Color(white: 0.55))
                     }
@@ -241,11 +241,11 @@ private struct PrinterSectionView: View {
 
                 // --- temperatures ---
                 HStack(spacing: 14) {
-                    TempReadout(label: "Сопло",
+                    TempReadout(label: tr("Сопло", "Nozzle"),
                                 value: PrinterFeature.temperature(r.nozzle, target: r.nozzleTarget))
-                    TempReadout(label: "Стол",
+                    TempReadout(label: tr("Стол", "Bed"),
                                 value: PrinterFeature.temperature(r.bed, target: r.bedTarget))
-                    TempReadout(label: "Камера",
+                    TempReadout(label: tr("Камера", "Chamber"),
                                 value: r.chamber.map { "\($0)°" } ?? "—")
                     Spacer(minLength: 0)
                 }
@@ -258,15 +258,17 @@ private struct PrinterSectionView: View {
 
         // --- errors, or the honest note about what this section is ---
         if !r.errorCodes.isEmpty {
-            Text("Ошибка принтера: " + r.errorCodes.joined(separator: ", ")
-                 + " — подробности на e.bambulab.com")
+            Text(tr("Ошибка принтера: ", "Printer error: ") + r.errorCodes.joined(separator: ", ")
+                 + tr(" — подробности на e.bambulab.com", " — details at e.bambulab.com"))
                 .font(.system(size: 9.5))
                 .foregroundStyle(IslandPalette.critical)
                 .lineLimit(1)
                 .frame(height: 12)
         } else {
-            Text("Читается с локальной панели 127.0.0.1 раз в 8 с. Только просмотр — "
-                 + "MacPulse не отправляет принтеру команд.")
+            Text(tr("Читается с локальной панели 127.0.0.1 раз в 8 с. Только просмотр — "
+                 + "MacPulse не отправляет принтеру команд.",
+                    "Read from the local panel 127.0.0.1 every 8 s. View only — "
+                 + "MacPulse sends the printer no commands."))
                 .font(.system(size: 8.5))
                 .foregroundStyle(Color(white: 0.34))
                 .lineLimit(1)
@@ -309,18 +311,18 @@ private struct TempReadout: View {
 extension IslandSection {
     static let printer = IslandSection(
         id: .printer,
-        chipTitle: "Печать",
+        chipTitle: tr("Печать", "Print"),
         chipSymbol: "printer",
         // Cheap and pure: one Optional read off a @Published property the
         // poller already wrote. No syscall, no I/O — see IslandSection.swift.
         hasState: { $0.printer != nil },
         footerSummary: { model in
             guard let r = model.printer else { return nil }
-            if !r.errorCodes.isEmpty { return "Печать: ошибка" }
-            if r.stage == "PAUSE" { return "Печать на паузе" }
-            if r.stage == "FINISH" { return "Печать готова" }
-            guard let p = r.percent else { return "Печать идёт" }
-            return "Печать \(p)%"
+            if !r.errorCodes.isEmpty { return tr("Печать: ошибка", "Print: error") }
+            if r.stage == "PAUSE" { return tr("Печать на паузе", "Print paused") }
+            if r.stage == "FINISH" { return tr("Печать готова", "Print done") }
+            guard let p = r.percent else { return tr("Печать идёт", "Printing") }
+            return tr("Печать \(p)%", "Print \(p)%")
         },
         makeBody: { model in AnyView(PrinterSectionView(model: model)) }
     )

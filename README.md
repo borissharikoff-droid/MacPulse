@@ -19,7 +19,7 @@
 
 ### [⬇&nbsp;&nbsp;Download MacPulse](https://github.com/borissharikoff-droid/MacPulse/releases/latest)
 
-<sup>macOS 13 or newer · Apple Silicon and Intel · 3 MB</sup>
+<sup>macOS 13 or newer · Apple Silicon and Intel · English and Russian · 3 MB</sup>
 
 </div>
 

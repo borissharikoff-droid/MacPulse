@@ -259,7 +259,7 @@ private struct SoundSectionView: View {
             Text("—")
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(Color(white: 0.5))
-                .help("Аудиосервер не ответил. Это «не измерено», а не «тихо».")
+                .help(tr("Аудиосервер не ответил. Это «не измерено», а не «тихо».", "The audio server did not answer. That is “not measured”, not “silent”."))
         }
     }
 
@@ -275,7 +275,7 @@ private struct SoundSectionView: View {
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text("аудиопоток открыт")
+                Text(tr("аудиопоток открыт", "audio stream open"))
                     .font(.system(size: 10.5))
                     .foregroundStyle(Color(white: 0.44))
                     .help(SoundFeature.outputStreamCaveat)
@@ -302,8 +302,8 @@ private struct SoundSectionView: View {
                 }
                 .frame(height: 26)
             }
-            Text((list.count > 4 ? "и ещё \(list.count - 4) · " : "")
-                 + "команда уйдёт одному из них")
+            Text((list.count > 4 ? tr("и ещё \(list.count - 4) · ", "and \(list.count - 4) more · ") : "")
+                 + tr("команда уйдёт одному из них", "the command goes to one of them"))
                 .font(.system(size: 9.5))
                 .foregroundStyle(IslandPalette.warning.opacity(0.8))
                 .lineLimit(1)
@@ -335,7 +335,7 @@ private struct SoundSectionView: View {
     /// because the panel is read at a glance and they are not. The name
     /// leads it so that a middle-truncated row is still recoverable.
     private func identity(_ app: SoundApp) -> String {
-        let bundle = app.bundleIdentifier ?? "без bundle id"
+        let bundle = app.bundleIdentifier ?? tr("без bundle id", "no bundle id")
         return app.name + " · " + (app.pid.map { "\(bundle) · pid \($0)" } ?? bundle)
     }
 
@@ -351,11 +351,11 @@ private struct SoundSectionView: View {
                 ForEach(Self.keys.filter { available.commands.contains($0) },
                         id: \.rawValue) { SoundKey(command: $0) }
             } else {
-                Text("Транспорт недоступен")
+                Text(tr("Транспорт недоступен", "Transport unavailable"))
                     .font(.system(size: 11))
                     .foregroundStyle(IslandPalette.warning)
                     .lineLimit(1)
-                    .help(available.unavailableReason ?? "MediaRemote не отвечает")
+                    .help(available.unavailableReason ?? tr("MediaRemote не отвечает", "MediaRemote is not responding"))
             }
         }
         .frame(height: 40)
@@ -394,11 +394,15 @@ private struct SoundKey: View {
     private static func tooltip(_ command: SoundCommand) -> String {
         switch command {
         case .nextTrack, .previousTrack:
-            return "\(command.title). Двигает курсор очереди; на краю очереди молча "
-                 + "ничего не делает, и подтвердить результат нечем."
+            return tr("\(command.title). Двигает курсор очереди; на краю очереди молча "
+                 + "ничего не делает, и подтвердить результат нечем.",
+                      "\(command.title). Moves the queue cursor; at the end of the "
+                 + "queue it silently does nothing, and the result cannot be confirmed.")
         default:
-            return "\(command.title). Уходит системному плееру; «принято» значит только, "
-                 + "что сообщение поставлено в очередь."
+            return tr("\(command.title). Уходит системному плееру; «принято» значит только, "
+                 + "что сообщение поставлено в очередь.",
+                      "\(command.title). Goes to the system player; “accepted” only "
+                 + "means the message was queued.")
         }
     }
 }
@@ -408,7 +412,7 @@ private struct SoundKey: View {
 extension IslandSection {
     static let sound = IslandSection(
         id: .sound,
-        chipTitle: "Звук",
+        chipTitle: tr("Звук", "Sound"),
         chipSymbol: "speaker.wave.2",
         // Cheap and pure: one Bool off a @Published struct the watcher
         // already wrote. FALSE when nobody has audio open, and false when
@@ -417,8 +421,8 @@ extension IslandSection {
         hasState: { $0.sound.hasOutput },
         footerSummary: { model in
             guard let apps = model.sound.apps, !apps.isEmpty else { return nil }
-            if apps.count == 1 { return "Звук: \(apps[0].name)" }
-            return "Звук: " + SoundFeature.sources(apps.count)
+            if apps.count == 1 { return tr("Звук: \(apps[0].name)", "Sound: \(apps[0].name)") }
+            return tr("Звук: ", "Sound: ") + SoundFeature.sources(apps.count)
         },
         makeBody: { model in AnyView(SoundSectionView(model: model)) }
     )

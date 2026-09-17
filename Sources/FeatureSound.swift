@@ -152,11 +152,11 @@ enum SoundCommand: Int32, CaseIterable {
     /// Button label, Russian like the rest of the island.
     var title: String {
         switch self {
-        case .play: return "Пуск"
-        case .pause: return "Пауза"
-        case .togglePlayPause: return "Пуск/пауза"
-        case .nextTrack: return "Далее"
-        case .previousTrack: return "Назад"
+        case .play: return tr("Пуск", "Play")
+        case .pause: return tr("Пауза", "Pause")
+        case .togglePlayPause: return tr("Пуск/пауза", "Play/pause")
+        case .nextTrack: return tr("Далее", "Next")
+        case .previousTrack: return tr("Назад", "Previous")
         }
     }
 
@@ -192,8 +192,24 @@ struct SoundTransport: Equatable {
     let frameworkLoaded: Bool
     let sendResolved: Bool
     let commands: [SoundCommand]
+
     /// Why it is unusable, for the user's eyes. nil when it works.
-    let unavailableReason: String?
+    ///
+    /// DERIVED, NOT STORED, and that is about language rather than
+    /// tidiness. `SoundControl.availability` has to be a `static let` —
+    /// `send` is callable from any thread, and a lazy var's
+    /// initialisation is unsynchronised — so anything STORED in it is
+    /// resolved once, at first touch, in whatever language was current
+    /// then. A user who switched to English afterwards kept this sentence
+    /// in Russian until they relaunched. Computing it from the two flags
+    /// that actually decided it costs nothing and is always current.
+    var unavailableReason: String? {
+        if sendResolved { return nil }
+        return frameworkLoaded
+            ? tr("MediaRemote загружен, но символа MRMediaRemoteSendCommand в нём нет",
+                 "MediaRemote loaded, but it has no MRMediaRemoteSendCommand symbol")
+            : tr("MediaRemote.framework не загружается", "MediaRemote.framework will not load")
+    }
 
     var isAvailable: Bool { sendResolved && !commands.isEmpty }
 }
@@ -278,18 +294,13 @@ enum SoundControl {
     static let availability: SoundTransport = {
         guard SoundRemoteBridge.shared != nil else {
             let loaded = SoundRemoteBridge.frameworkLoaded
-            return SoundTransport(
-                frameworkLoaded: loaded,
-                sendResolved: false,
-                commands: [],
-                unavailableReason: loaded
-                    ? "MediaRemote загружен, но символа MRMediaRemoteSendCommand в нём нет"
-                    : "MediaRemote.framework не загружается")
+            return SoundTransport(frameworkLoaded: loaded,
+                                  sendResolved: false,
+                                  commands: [])
         }
         return SoundTransport(frameworkLoaded: true,
                               sendResolved: true,
-                              commands: SoundCommand.allCases,
-                              unavailableReason: nil)
+                              commands: SoundCommand.allCases)
     }()
 
     /// The XPC round trip, off the main thread so a button press can never
@@ -706,32 +717,38 @@ struct SoundState: Equatable {
 enum SoundFeature {
 
     /// Why the section prints НЕИЗВЕСТНО where a player would print ▶/⏸.
-    static let playStateUnknownReason =
-        "Состояние воспроизведения измерить нечем: чтение MediaRemote закрыто "
+    static var playStateUnknownReason: String {
+        tr("Состояние воспроизведения измерить нечем: чтение MediaRemote закрыто "
         + "правом com.apple.mediaremote.allow (отвечает пустотой), а открытый "
-        + "аудиопоток — не признак игры: он остаётся открытым ещё 5–10 с после паузы."
+        + "аудиопоток — не признак игры: он остаётся открытым ещё 5–10 с после паузы.",
+           "Play state cannot be measured: MediaRemote reads are gated by the "
+        + "com.apple.mediaremote.allow entitlement (it answers empty), and an open "
+        + "audio stream is not playback: it stays open 5–10 s after a pause.")
+    }
 
     /// What «аудиопоток открыт» means, for the hover.
-    static let outputStreamCaveat =
-        "«Аудиопоток открыт» — у приложения есть активный поток вывода (CoreAudio). "
-        + "Это не «играет»: после паузы поток держится ещё 5–10 с."
+    static var outputStreamCaveat: String {
+        tr("«Аудиопоток открыт» — у приложения есть активный поток вывода (CoreAudio). "
+        + "Это не «играет»: после паузы поток держится ещё 5–10 с.",
+           "“Audio stream open” — the app has an active output stream (CoreAudio). "
+        + "It does not mean “playing”: the stream holds 5–10 s after a pause.")
+    }
 
     /// Why nothing nominates a target when there are several apps.
-    static let ambiguousTargetCaveat =
-        "Источников несколько. Команда уйдёт тому, кого текущим плеером считает "
+    static var ambiguousTargetCaveat: String {
+        tr("Источников несколько. Команда уйдёт тому, кого текущим плеером считает "
         + "система, — какому именно, MacPulse узнать не может (тот API закрыт). "
         + "Проверено: при двух играющих приложениях три команды подряд ушли одному "
-        + "и тому же, но предсказать это было нечем."
+        + "и тому же, но предсказать это было нечем.",
+           "Several sources. The command goes to whichever app the system treats as "
+        + "the current player — MacPulse cannot tell which one (that API is closed). "
+        + "Measured: with two apps playing, three commands in a row went to the same "
+        + "one, but nothing predicted it.")
+    }
 
     /// "1 источник" / "2 источника" / "5 источников".
     static func sources(_ n: Int) -> String {
-        let tail = n % 100
-        if tail >= 11 && tail <= 14 { return "\(n) источников" }
-        switch n % 10 {
-        case 1: return "\(n) источник"
-        case 2, 3, 4: return "\(n) источника"
-        default: return "\(n) источников"
-        }
+        plural(n, "источник", "источника", "источников", "source", "sources")
     }
 }
 
@@ -1167,7 +1184,7 @@ final class SoundWatcher {
             ?? row.processName
             ?? row.bundleIdentifier
             ?? row.pid.map { "pid \($0)" }
-            ?? "аудиообъект \(row.audioObjectID)"
+            ?? tr("аудиообъект \(row.audioObjectID)", "audio object \(row.audioObjectID)")
 
         return SoundApp(pid: ownerPID,
                         audioObjectID: row.audioObjectID,

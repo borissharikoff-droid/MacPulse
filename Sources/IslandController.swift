@@ -102,6 +102,21 @@ final class IslandController {
         panel = nil
     }
 
+    /// Drop the panel so the next layout pass builds a fresh SwiftUI tree.
+    ///
+    /// `tr` returns a plain String, so every label already drawn is frozen
+    /// in the language it was drawn in — there is nothing for SwiftUI to
+    /// invalidate. Rebuilding is the honest fix: it cannot miss a view the
+    /// way threading a language token through the tree would.
+    func rebuildForLanguageChange() {
+        let wasVisible = panel?.isVisible ?? true
+        panel?.orderOut(nil)
+        panel = nil
+        hostingView = nil
+        rebuildForCurrentScreens()
+        if !wasVisible { panel?.orderOut(nil) }
+    }
+
     /// The menu's "показать/скрыть" entry point.
     var isVisible: Bool { panel?.isVisible ?? false }
 

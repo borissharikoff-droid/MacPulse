@@ -1143,17 +1143,17 @@ public enum CalendarFmt {
     /// "12 мин", "1 ч 05 мин", "сейчас", "—".
     public static func countdown(_ event: CalendarEvent?, asOf now: Date = Date()) -> String {
         guard let event else { return "—" }
-        guard let seconds = event.secondsUntilStart(asOf: now) else { return "сейчас" }
+        guard let seconds = event.secondsUntilStart(asOf: now) else { return tr("сейчас", "now") }
         let minutes = Int((seconds / 60).rounded(.up))
-        if minutes < 60 { return "\(minutes) мин" }
+        if minutes < 60 { return tr("\(minutes) мин", "\(minutes) min") }
         let hours = minutes / 60
-        return String(format: "%d ч %02d мин", hours, minutes % 60)
+        return String(format: tr("%d ч %02d мин", "%d h %02d min"), hours, minutes % 60)
     }
 
     /// Compact strip form: "12′", "1:05", "—".
     public static func strip(_ event: CalendarEvent?, asOf now: Date = Date()) -> String {
         guard let event else { return "—" }
-        guard let seconds = event.secondsUntilStart(asOf: now) else { return "сейчас" }
+        guard let seconds = event.secondsUntilStart(asOf: now) else { return tr("сейчас", "now") }
         let minutes = Int((seconds / 60).rounded(.up))
         if minutes < 60 { return "\(minutes)′" }
         return String(format: "%d:%02d", minutes / 60, minutes % 60)
@@ -1173,7 +1173,7 @@ public enum CalendarFmt {
     /// title is private.
     public static func footer(_ snapshot: CalendarSnapshot) -> String? {
         guard let next = snapshot.next else { return nil }
-        return "Встреча через " + countdown(next)
+        return tr("Встреча через ", "Meeting in ") + countdown(next)
     }
 
     /// What to draw INSTEAD of a section when there is nothing.
@@ -1183,11 +1183,11 @@ public enum CalendarFmt {
         guard case .unavailable(let reason) = status else { return nil }
         switch reason {
         case .denied:
-            return "Доступ к Календарю запрещён. Системные настройки → Конфиденциальность."
+            return tr("Доступ к Календарю запрещён. Системные настройки → Конфиденциальность.", "Calendar access denied. System Settings → Privacy.")
         case .restricted:
-            return "Доступ к Календарю ограничен политикой системы."
+            return tr("Доступ к Календарю ограничен политикой системы.", "Calendar access is restricted by system policy.")
         case .writeOnly:
-            return "Календарь разрешил только запись — события недоступны."
+            return tr("Календарь разрешил только запись — события недоступны.", "Calendar granted write-only access — events unavailable.")
         case .missingUsageDescription, .requestFailed:
             return nil
         }

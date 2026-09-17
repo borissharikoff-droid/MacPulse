@@ -36,7 +36,8 @@ enum Maintenance {
         let ramFreeDeltaBytes: Int64
 
         var summary: String {
-            "Освобождено на диске: \(formatMB(freedDiskBytes))"
+            tr("Освобождено на диске: \(formatMB(freedDiskBytes))",
+               "Freed on disk: \(formatMB(freedDiskBytes))")
         }
     }
 
@@ -170,6 +171,6 @@ enum Maintenance {
     }
 
     private static func formatMB(_ bytes: Int64) -> String {
-        String(format: "%.0f МБ", Double(bytes) / 1_048_576.0)
+        String(format: tr("%.0f МБ", "%.0f MB"), Double(bytes) / 1_048_576.0)
     }
 }
