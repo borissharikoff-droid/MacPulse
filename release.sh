@@ -378,9 +378,16 @@ case "$MODE" in
     echo "   ./release.sh $VERSION --local      build the artifacts here and look at them"
     echo "   ./release.sh $VERSION --publish    do all of it, for real"
     echo
-    echo " This repo has no 'origin' yet, so --publish will stop at the"
-    echo " preflight until the GitHub repo exists. RELEASING.md has the"
-    echo " two commands that create it."
+    # Was an unconditional line saying the repo had no origin. It said so
+    # for a while after the repo existed, which is how a helpful note turns
+    # into a thing you learn to skim past.
+    if git remote get-url origin >/dev/null 2>&1; then
+      echo " origin: $(git remote get-url origin)"
+    else
+      echo " This repo has no 'origin' yet, so --publish will stop at the"
+      echo " preflight until the GitHub repo exists. RELEASING.md has the"
+      echo " two commands that create it."
+    fi
     ;;
   local)
     echo "============================================================"
@@ -396,9 +403,14 @@ case "$MODE" in
     echo "============================================================"
     echo " PUBLISHED: https://github.com/$REPO_OWNER/$REPO_NAME/releases/tag/$TAG"
     echo "============================================================"
-    echo " The .dmg is the link to send people. The first launch on their"
-    echo " machine WILL show 'unidentified developer' — that is expected for"
-    echo " an ad-hoc signature, and 'Если не открывается.txt' inside the DMG"
-    echo " walks them through it."
+    echo " Send people THIS, not the .dmg:"
+    echo ""
+    echo "   curl -fsSL https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/main/install.sh | bash"
+    echo ""
+    echo " It installs without a single Gatekeeper dialog, because curl does"
+    echo " not set the quarantine flag and Gatekeeper only blocks what carries"
+    echo " one. The .dmg is still attached for anyone who prefers dragging —"
+    echo " they will meet 'unidentified developer' once and need System"
+    echo " Settings ▸ Приватность и безопасность ▸ «Всё равно открыть»."
     ;;
 esac

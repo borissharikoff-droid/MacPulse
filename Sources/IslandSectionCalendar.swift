@@ -161,13 +161,37 @@ struct MeetingStripSlot: View {
                     .frame(width: IslandMetrics.slotTextWidth, alignment: .leading)
             }
         }
-        // NO TITLE IN THE TOOLTIP. A tooltip is drawn over other apps'
-        // windows and survives a screen recording; the calendar name and
-        // the clock say everything a glance needs without naming what the
-        // meeting is.
-        .help("Встреча через " + CalendarFmt.countdown(event)
-              + " · начало в " + CalendarFmt.clock(event.startDate)
-              + (event.calendarTitle.map { " · " + $0 } ?? ""))
+        .help(tooltip)
+    }
+
+    /// NO TITLE IN THE TOOLTIP. A tooltip is drawn over other apps'
+    /// windows and survives a screen recording; the calendar name and the
+    /// clock say everything a glance needs without naming what the
+    /// meeting is.
+    ///
+    /// BUILT HERE, WITH INTERPOLATION, AND NOT INLINE WITH `+`. It used to
+    /// be a chain of four `+` with an `Optional.map` in the middle, sitting
+    /// inside `body`. `+` is one of the most heavily overloaded operators in
+    /// the language, and the solver explores those overloads combinatorially
+    /// across a chain: measured with
+    /// `-warn-long-expression-type-checking`, that one expression cost
+    /// 872 ms and dragged the whole `body` getter to 2213 ms — against a
+    /// 400 ms budget, and it was the only place in ~61 files over the line.
+    ///
+    /// On this toolchain it merely made the build slow. On the Swift in
+    /// Xcode 15.4 the solver gave up entirely: "the compiler is unable to
+    /// type-check this expression in reasonable time", which is a HARD
+    /// ERROR. So this compiled here and nowhere else — anyone cloning the
+    /// repo with an older toolchain could not build MacPulse at all, and
+    /// only CI on a different compiler found it.
+    ///
+    /// Interpolation is not overloaded the same way; each `+=` is its own
+    /// small problem. Same string, and now it type-checks in nothing.
+    private var tooltip: String {
+        var line = "Встреча через \(CalendarFmt.countdown(event))"
+        line += " · начало в \(CalendarFmt.clock(event.startDate))"
+        if let calendar = event.calendarTitle { line += " · \(calendar)" }
+        return line
     }
 }
 

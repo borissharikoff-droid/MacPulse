@@ -35,11 +35,26 @@ import AppKit
 //     `\(` appearing between "://" and the first "/".
 //   * The one URL this file does NOT spell out is the release asset's
 //     download URL, which arrives inside GitHub's JSON. So it is checked
-//     at RUNTIME against the same three-host allow-list, before any byte
-//     of it is fetched — see `isAllowedGitHubURL`. GitHub redirects
-//     release-asset downloads to objects.githubusercontent.com, which is
-//     why that third host is on the list; the redirect is followed only
-//     because it, too, lands on an allowed host.
+//     at RUNTIME against the allow-list, before any byte of it is
+//     fetched — see `isAllowedGitHubURL`.
+//
+//     WHAT THAT CHECK DOES NOT COVER, stated plainly because the comment
+//     here used to claim otherwise: REDIRECTS ARE NOT CHECKED. There is
+//     no `willPerformHTTPRedirection` delegate, so URLSession follows
+//     GitHub's redirect chain wherever it goes. The guarantee is about
+//     the FIRST hop only — the URL we are handed must be on the list —
+//     and after that we are trusting GitHub with a TLS connection we
+//     opened to GitHub.
+//
+//     Measured the day v1.0.0 shipped: the asset URL is on github.com
+//     and redirects to release-assets.githubusercontent.com — NOT to
+//     objects.githubusercontent.com, which is where it used to go and
+//     which this comment used to assert. That is exactly why no delegate
+//     was added to enforce the list on every hop: such a rule would have
+//     been written against the old host and would now silently break
+//     every auto-update, and an updater that stops working is a worse
+//     outcome than an updater whose redirect chain is GitHub's business.
+//     An accurate comment is the honest version of that trade.
 //   * No raw socket is opened here. `nm -u` on the built binary still
 //     shows exactly the socket/connect/getpeername/poll it showed before
 //     — those are PultLink's and TunnelSampler's. CFNetwork does its own
@@ -105,7 +120,14 @@ enum Updater {
     ///
     ///   api.github.com                — the Releases API
     ///   github.com                    — where browser_download_url points
-    ///   objects.githubusercontent.com — where that immediately redirects
+    ///   objects.githubusercontent.com — a host GitHub has served assets
+    ///                                   from; kept because the API may
+    ///                                   hand us such a URL directly.
+    ///
+    /// This is the set the URL FROM THE JSON is checked against. It is not
+    /// a list of every host the download touches: redirects are followed
+    /// unchecked, and today's chain leaves it for
+    /// release-assets.githubusercontent.com. See the note at the top.
     ///
     /// Deliberately bare hostnames and not URLs, so the build-time
     /// http(s)-literal sweep has nothing to chew on here and the list
