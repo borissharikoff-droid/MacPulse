@@ -35,6 +35,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     /// forces a fresh sample, so it is never stale when it matters.
     private var isMenuOpen = false
 
+    /// Why the last attempt to switch on the login item failed, if it
+    /// did. Kept because `SMAppService.status` cannot say: a copy in
+    /// ~/Downloads reports plain `.notRegistered` after a refusal, which
+    /// is indistinguishable from "switched off on purpose".
+    private var loginFailure: String?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // MacPulse only reads system counters and touches files under
         // ~/Library/Caches and ~/Library/Logs — it needs no TCC-gated
@@ -126,7 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         loginItem = NSMenuItem(title: "Запускать при входе",
                                action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         loginItem.target = self
-        loginItem.state = LaunchAtLogin.isEnabled ? .on : .off
+        renderLoginItem()
         menu.addItem(loginItem)
 
         // THE ONLY THING IN MACPULSE THAT CAN SHOW A PERMISSION DIALOG,
@@ -259,6 +265,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         if let hint = CalendarFmt.unavailableHint(CalendarEngine.shared.snapshot.status) {
             calendarItem.toolTip = hint
         }
+
+        // Same free-recovery reason as the calendar line above: nothing
+        // tells us when the user flips this in System Settings.
+        renderLoginItem()
 
         islandItem.title = island.isVisible ? "Скрыть островок" : "Показать островок"
     }
@@ -438,10 +448,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         }
     }
 
+    /// Draws the login item from what macOS says, and from nothing else.
+    ///
+    /// Called on every menu open as well as at build time: the user can
+    /// switch this off in System Settings and macOS posts nothing when
+    /// they do, so a checkmark read once at launch is a checkmark that
+    /// eventually lies.
+    private func renderLoginItem(_ state: LaunchAtLogin.State = LaunchAtLogin.state) {
+        switch state {
+        case .on:
+            loginItem.state = .on
+            loginItem.toolTip = "MacPulse появится в островке сразу после входа в систему."
+            loginFailure = nil
+        case .off:
+            loginItem.state = .off
+            loginItem.toolTip = loginFailure
+                ?? "Сейчас выключено — MacPulse нужно запускать вручную."
+        case .needsApproval:
+            // NOT a checkmark. In this state the app does not start at
+            // login, and a checkmark would say that it does. The dash is
+            // the native way to say «ни то ни другое».
+            loginItem.state = .mixed
+            loginItem.toolTip = "Зарегистрировано, но выключено в «Объектах входа». "
+                              + "Нажмите, чтобы открыть этот раздел настроек."
+        case .unavailable(let why):
+            loginItem.state = .off
+            loginItem.toolTip = why
+        }
+    }
+
     @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {
-        let newValue = sender.state != .on
-        LaunchAtLogin.isEnabled = newValue
-        sender.state = newValue ? .on : .off
+        // `.needsApproval` is the one state this menu cannot change —
+        // only the user can, in System Settings. Take them there instead
+        // of pretending the click did something.
+        if LaunchAtLogin.state == .needsApproval {
+            _ = LaunchAtLogin.openLoginItemsSettings()
+            return
+        }
+        // `sender.state != .on` and not a stored flag: the checkmark on
+        // screen is what the user is answering.
+        let result = LaunchAtLogin.set(sender.state != .on)
+        if case .unavailable(let why) = result {
+            loginFailure = why
+            renderLoginItem(result)
+            reportLoginFailure(why)
+        } else {
+            loginFailure = nil
+            renderLoginItem(result)
+        }
+    }
+
+    /// The only modal in MacPulse, and it exists because the menu closes
+    /// on the click that fails. A tooltip cannot be read by somebody
+    /// whose menu has just disappeared, and a switch that refuses in
+    /// silence is the bug this whole path was rewritten to remove.
+    private func reportLoginFailure(_ why: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Автозапуск не включился"
+        alert.informativeText = why
+        alert.addButton(withTitle: "Понятно")
+        // Accessory apps have no windows to come forward; without this the
+        // alert opens behind whatever the user is looking at.
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     @objc private func toggleCalendar(_ sender: NSMenuItem) {

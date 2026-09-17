@@ -22,11 +22,17 @@ import AppKit
 //
 //   /Applications/MacPulse.app/Contents/MacOS/MacPulse --rail-probe [20]
 //
-// It draws nothing and opens no panel: `status` stays `.closed`
-// throughout, so this is also a fair look at what the COLLAPSED island
-// has decided — including which section owns the trailing wing's one
-// slot, which is the other cross-feature question nobody can see from
-// inside a single feature's file.
+// It draws nothing and opens no panel, so the middle of it is a fair
+// look at what the COLLAPSED island has decided — including which
+// section owns the trailing wing's one slot, which is the other
+// cross-feature question nobody can see from inside a single feature's
+// file.
+//
+// The LAST stage marks the model open and clicks through every tab,
+// waiting out a real tick under each one. That answers a different
+// question — whether the router lets the user's click stand — and it is
+// the only stage with an answer that does not depend on this machine,
+// so it is the only one that sets an exit code.
 // =====================================================================
 
 enum RailProbe {
@@ -138,10 +144,63 @@ enum RailProbe {
         print("A quiet machine should show ONE chip. Anything else is either a")
         print("real condition on this machine right now, or a section that broke")
         print("the second rule in IslandSection.swift.")
+        print("")
+
+        // -------------------------------------------------------------
+        // Does a deliberate click SURVIVE the next refresh?
+        //
+        // For one build it did not. `refreshRouter()` reset the selection
+        // to Память whenever the selected section was not live, and it
+        // runs on every refresh of an open panel — so clicking a quiet
+        // tab put you there and threw you back about a second later. The
+        // user found it before any check here did: "жму другую табу,
+        // проходит 1 сек и меня кидает обратно".
+        //
+        // Nothing above could have caught it. The rail this probe prints
+        // was right the whole time; what was wrong was what happened one
+        // tick after a click, and no instant assertion can see that. So
+        // this waits.
+        // -------------------------------------------------------------
+        print("--- does a clicked tab survive the next refresh? --------------")
+        model.setStatus(.opened)
+        // Opening navigates to the strip slot on its own. Let that land
+        // before measuring, or the first selection below races it.
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+
+        var bounced: [String] = []
+        for section in IslandSectionRegistry.sections {
+            let id = section.id
+            let live = section.hasState(model)
+            model.select(id)
+            guard model.selectedSection == id else {
+                bounced.append(section.chipTitle)
+                print("  " + pad(id.rawValue, 10) + pad(live ? "live" : "quiet", 7)
+                      + "REFUSED — select() would not go there at all")
+                continue
+            }
+            // Longer than the 1 Hz base tick, so at least two real
+            // refreshes run underneath the selection.
+            RunLoop.current.run(until: Date().addingTimeInterval(2.2))
+            let held = model.selectedSection == id
+            if !held { bounced.append(section.chipTitle) }
+            print("  " + pad(id.rawValue, 10) + pad(live ? "live" : "quiet", 7)
+                  + (held ? "holds" : "*** BOUNCED to \(model.selectedSection.rawValue)"))
+        }
+        model.setStatus(.closed)
+        print("")
+        print(bounced.isEmpty
+              ? "  every tab holds, live or quiet"
+              : "  *** the router overrode the user on: "
+                + bounced.joined(separator: ", "))
 
         model.stop()
+        print("")
         print("=== done ===")
-        exit(0)
+        // This ONE check has a right answer that does not depend on the
+        // machine, so it is the only thing here that sets an exit code.
+        // How many chips are live is a reading; a tab that will not hold
+        // is a defect.
+        exit(bounced.isEmpty ? 0 : 1)
     }
 
     /// Mirrors `RailChip`'s layout exactly: the padding either side, a 4 pt

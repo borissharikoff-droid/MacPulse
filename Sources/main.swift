@@ -89,6 +89,13 @@ if CommandLine.arguments.contains("--rail-probe") {
 // tables, the REAL validator run against a zip you built by hand, or one
 // real GitHub round trip that installs nothing. See UpdateProbe.swift.
 //   ... --update-probe [validate <zip> | check]
+// «Запускать при входе»: what macOS says about this copy, and — with
+// `roundtrip` — a real register/unregister that restores what it found.
+// See LoginProbe.swift.
+if CommandLine.arguments.contains("--login-probe") {
+    LoginProbe.run(arguments: CommandLine.arguments)
+}
+
 if CommandLine.arguments.contains("--update-probe") {
     UpdateProbe.run(arguments: CommandLine.arguments)
 }

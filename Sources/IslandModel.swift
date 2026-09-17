@@ -513,15 +513,30 @@ final class IslandModel: ObservableObject {
     /// metric ticks, and the rail would otherwise be up to a full tick out
     /// of date at exactly the moment the user is looking at it.
     private func refreshRouter() {
-        // The rail lists only what is live. Memory always is, which is why
-        // it is the fallback below and why the rail is never empty.
+        // What is LIVE — not what the rail draws. The rail draws every
+        // registered section; this list is the subset with something in it,
+        // and it drives the dimming, the footer and the open-time jump.
         let ids = IslandSectionRegistry.sections.filter { $0.hasState(self) }.map(\.id)
         if visibleSections != ids { visibleSections = ids }
 
-        // The selected tab can go quiet under the user (a print finishes
-        // while they are looking at it). Fall back rather than show a body
-        // for a section with nothing in it.
-        if !ids.contains(selectedSection) { selectedSection = .memory }
+        // THE SELECTED TAB IS NOT TOUCHED HERE, and it used to be. This line
+        // fell back to Память whenever the selection went quiet, which was
+        // right while the rail listed only live sections: a chip could
+        // vanish under the user, and a body with nothing in it was worse
+        // than a redirect.
+        //
+        // Since the rail lists EVERY section, that rule actively fights the
+        // user. `refreshRouter` runs on the panel's refresh, so clicking a
+        // quiet tab — «Печать» with no print — put you there and bounced
+        // you back to Память about a second later. The user reported
+        // exactly that: "жму другую табу, проходит 1 сек и меня кидает
+        // обратно".
+        //
+        // A quiet section draws its own empty state, which is a real answer
+        // and the reason selecting one is allowed at all. `visibleSections`
+        // still tracks what is live — the footer and the open-time
+        // `selectIfLive` both need it — it just no longer overrides a
+        // deliberate click.
 
         refreshFooter()
     }
